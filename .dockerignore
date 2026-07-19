@@ -1,0 +1,10 @@
+.agents/
+.git/
+.gradle/
+.idea/
+.secrets/
+build/
+*.log
+.DS_Store
+.env
+local.properties

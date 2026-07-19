@@ -1,0 +1,7 @@
+# syntax=docker/dockerfile:1.7@sha256:a57df69d0ea827fb7266491f2813635de6f17269be881f696fbfdf2d83dda33e
+
+FROM ghcr.io/pglayers/pgx-postgis:17@sha256:e2113e93a71f5f8fd272830c9c7c4843bc7d77cd0587f47e08679d52aa2a0c53 AS postgis
+
+FROM postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
+
+COPY --from=postgis / /
