@@ -84,9 +84,14 @@ and does not render its value into the resolved configuration:
 
 ```bash
 mkdir -p .secrets
+chmod 700 .secrets
 openssl rand -hex 32 > .secrets/database-password
-chmod 600 .secrets/database-password
+chmod 444 .secrets/database-password
 ```
+
+The host-owner-only directory prevents other host users from reaching the
+password. The file itself is read-only so Docker Compose can bind-mount it into
+the explicitly authorized services and their non-root users can read it.
 
 Build and start through database, Flyway, and application readiness:
 
