@@ -69,3 +69,67 @@ Clone this repo and push your solution to your own public repository.
 ## 📬 Submission
 
 Submit your repository link. We will read your code, your `AI_LOG.md`, and your `SECURITY.md`.
+
+---
+
+## Local/evaluator Docker baseline
+
+The default stack requires Docker Engine with Docker Compose. It runs PostgreSQL
+and PostGIS inside Compose; do not install a host database. The backend is
+published only on loopback, the database has no host port, and the default stack
+contains no OIDC or external AI service.
+
+Create an ignored local database-password file. Compose mounts it as a secret
+and does not render its value into the resolved configuration:
+
+```bash
+mkdir -p .secrets
+openssl rand -hex 32 > .secrets/database-password
+chmod 600 .secrets/database-password
+```
+
+Build and start through database, Flyway, and application readiness:
+
+```bash
+docker compose config
+docker compose build
+docker compose up --wait
+curl --fail http://127.0.0.1:8080/actuator/health/readiness
+```
+
+Inspect the applied migration and PostGIS version:
+
+```bash
+docker compose exec -T database \
+  psql --username persons_finder --dbname persons_finder \
+  --command='TABLE flyway_schema_history;'
+
+docker compose exec -T database \
+  psql --username persons_finder --dbname persons_finder \
+  --command='SELECT PostGIS_Full_Version();'
+```
+
+Restart against the same named volume and wait for readiness again:
+
+```bash
+docker compose restart
+docker compose up --wait
+```
+
+Inspect logs before teardown. Application logs must remain metadata-only and
+must not contain profile data, coordinates, bios, secrets, or raw AI payloads:
+
+```bash
+docker compose logs --no-color
+```
+
+Stop the stack while preserving the named database volume:
+
+```bash
+docker compose down
+```
+
+Do not use `docker compose down --volumes` unless you explicitly intend to
+delete disposable local database state. Future identity infrastructure belongs
+in a separate secure Compose file and project; it is not a profile of this
+assessment-local stack.

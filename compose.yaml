@@ -1,0 +1,82 @@
+name: persons-finder
+
+services:
+  database:
+    build:
+      context: .
+      dockerfile: Dockerfile.postgis
+    image: persons-finder-postgis:17
+    environment:
+      POSTGRES_DB: persons_finder
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+      POSTGRES_USER: persons_finder
+    secrets:
+      - source: database_password
+        target: database_password
+    volumes:
+      - persons_finder_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready --dbname=persons_finder --username=persons_finder
+      interval: 2s
+      timeout: 3s
+      retries: 30
+      start_period: 5s
+    networks:
+      - backend
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: persons-finder-app:local
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://database:5432/persons_finder
+      SPRING_DATASOURCE_USERNAME: persons_finder
+    secrets:
+      - source: database_password
+        target: spring.datasource.password
+    ports:
+      - "127.0.0.1:${PERSONS_FINDER_PORT:-8080}:8080"
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - http://127.0.0.1:8080/actuator/health/readiness
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 10s
+    networks:
+      - edge
+      - backend
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+secrets:
+  database_password:
+    file: ./.secrets/database-password
+
+volumes:
+  persons_finder_postgres_data:
+
+networks:
+  edge:
+  backend:
+    internal: true
