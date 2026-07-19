@@ -1,0 +1,7 @@
+[agents.security_privacy_reviewer]
+description = "Read-only reviewer for security, privacy, AI egress, and logging risks."
+config_file = "./agents/security_privacy_reviewer.toml"
+
+[agents.independent_verifier]
+description = "Read-only verifier of implementation and evidence claims against repository state."
+config_file = "./agents/independent_verifier.toml"
