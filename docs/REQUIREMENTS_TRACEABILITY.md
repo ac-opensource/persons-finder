@@ -1,6 +1,6 @@
 # Persons Finder Requirements Traceability
 
-This is the human-owned requirements and decision ledger. This harness records plans only: no product item below is implemented or verified.
+This is the human-owned requirements and decision ledger. Product behavior remains planned; completed infrastructure spikes are labeled independently from product delivery.
 
 ## Status vocabulary
 
@@ -42,8 +42,8 @@ This is the human-owned requirements and decision ledger. This harness records p
 | D04 | accepted | Nearby query units are kilometres with `0 < radius <= 100`; include the exact boundary and distance zero, return every match without a silent cap, and expose D03 public fields plus one-decimal `distanceKm`. Membership/order use unrounded spheroidal distance, then public UUID. | `[planned]` | `[planned]` |
 | D05 | accepted | Reject unknown fields, non-finite coordinates, latitude outside `[-90, 90]`, and longitude outside `[-180, 180]`. Return sanitized RFC 9457 Problem Details without internals: 400 `VALIDATION_FAILED`, 404 `PERSON_NOT_FOUND`, 409 `IDEMPOTENCY_KEY_REUSED`, 422 `BIO_INPUT_REJECTED`, or 503 `BIO_GENERATION_UNAVAILABLE`; D06 owns the unresolved 400/422 source boundary. | `[planned]` | `[planned]` |
 | D06 | open | Name/job/hobby code-point, field/cardinality/aggregate limits and the deterministic 400-versus-422 source-policy boundary are unresolved; D04's radius limit remains accepted. | `[planned after closure]` | `[planned after closure]` |
-| D07 | accepted | Spring Boot 4.1 is the evidence-gated spike target, compared with 2.7; pin versions only after clean-wrapper compatibility evidence, and stop to present the smallest supported alternative if the target fails. It is not a verified runtime. | `[planned]` | `[planned]` |
-| D08 | open | Exact runtime pins, spike cutoff, and supported fallback are unresolved. | `[planned after closure]` | `[planned after closure]` |
+| D07 | accepted | Use Spring Boot 4.1.0 rather than retaining the starter's unsupported 2.7.0 stack. The focused comparison passed its approved compatibility gate; container and real-PostGIS evidence remain separate gates. | `[implemented]` Boot 4.1.0 migration spike | `[verified]` clean wrapper test/build and focused runtime smoke |
+| D08 | accepted | Pin Spring Boot 4.1.0, Kotlin 2.3.21, Gradle 8.14.5, Java 17, dependency-management plugin 1.1.7, and springdoc 3.0.3. The fallback is unnecessary unless later evidence falsifies this approved combination. | `[implemented]` build and wrapper pins | `[verified]` compatibility spike accepted by the human |
 | D09 | accepted | Use direct Spring JDBC, explicit PostGIS SQL, and Flyway as sole DDL owner; H2/JPA are not integration truth. | `[planned]` | `[planned]` |
 | D10 | accepted | The Docker-first default must run natively on arm64 and amd64, bind the backend to loopback, keep the database internal without a host port, gate readiness on Flyway/database health, persist in a named volume, and require no host PostgreSQL, OIDC, or external AI credential. | `[planned]` | `[planned]` |
 | D11 | open | The exact trustworthy, immutable multi-architecture PostGIS artifact is unresolved. | `[planned after closure]` | `[planned after closure]` |
@@ -79,7 +79,6 @@ This is the human-owned requirements and decision ledger. This harness records p
 | ID | Remains unresolved | Pass gate before dependent implementation | Implementation evidence | Verification evidence |
 |---|---|---|---|---|
 | D06 | Field/cardinality/aggregate limits and ordinary-validation versus malicious-input classification. | Human records exact, justified, testable rules before controller or bio-policy work. | `[planned after closure]` | `[planned after closure]` |
-| D08 | Runtime versions, compatibility-spike bound, failure cutoff, and fallback. | The focused spike produces executable evidence and the human accepts exact pins or a presented supported alternative. | `[planned after closure]` | `[planned after closure]` |
 | D11 | Multi-architecture PostGIS source, maintenance owner, provenance, and immutable pin. | Native arm64 and amd64 evidence plus supply-chain review supports one human-approved artifact. | `[planned after closure]` | `[planned after closure]` |
 | D16 | UUID persistence/order and canonical geographic-point algorithm. | Human accepts one schema/canonicalization contract before migrations or replay logic. | `[planned after closure]` | `[planned after closure]` |
 | D17 | Timestamp parsing/precision/skew and exact PUT response fields. | Human accepts one externally testable time/response contract before PUT implementation. | `[planned after closure]` | `[planned after closure]` |
@@ -129,7 +128,7 @@ This is the human-owned requirements and decision ledger. This harness records p
 | E01 | D01, R01 | `[planned]` HTTP route/mapping contract checks. | Only the three approved routes map; aliases do not. | |
 | E02 | D02-D04, R02 | `[planned]` API and persistence contract checks. | UUID/public-field/privacy/radius/order/rounding behavior exactly matches the ledger. | |
 | E03 | D05, D06 | `[planned]` Validation and sanitized Problem Details boundary checks. | Every approved boundary maps to the approved status/code without leaking values or internals. | |
-| E04 | D07, D08, R03 | `[planned]` Clean wrapper compatibility spike under recorded exact pins. | Accepted runtime compiles and focused checks pass, or the spike stops for human fallback selection. | |
+| E04 | D07, D08, R03 | Clean wrapper compatibility spike under recorded exact pins. | Accepted runtime compiles and focused checks pass, or the spike stops for human fallback selection. | `[verified]` Boot 4.1.0 `clean test`, `clean build`, application startup, existing-route smoke, and OpenAPI smoke passed; human approved the migration. |
 | E05 | D09, R04 | `[planned]` Fresh/reused PostGIS migration and schema inspection. | Flyway alone owns DDL and repeat startup preserves migration integrity. | |
 | E06 | D10, D11, R05 | `[planned]` Native arm64/amd64 manifest, build, health, networking, and persistence evidence. | Both architectures run without emulation; DB remains internal and volume behavior is explicit. | |
 | E07 | D12, D13, R06 | `[planned]` Real PostGIS edge fixtures and representative query plans. | Boundary, tie, antimeridian, pole, spheroidal order, and expected GiST behavior pass. | |
