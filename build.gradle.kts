@@ -1,4 +1,5 @@
 import org.gradle.api.tasks.JavaExec
+import org.gradle.api.tasks.Exec
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -60,6 +61,26 @@ tasks.withType<Test> {
 			environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
 		}
 	}
+}
+
+val dashboardJsTest =
+	tasks.register<Exec>("dashboardJsTest") {
+		group = "verification"
+		description = "Runs the dashboard response-shape and coordinate tests"
+		workingDir = layout.projectDirectory.asFile
+		commandLine(
+			"node",
+			"--test",
+			"src/test/js/dashboard-nearby.test.js",
+		)
+		inputs.files(
+			"src/main/resources/static/assets/dashboard.js",
+			"src/test/js/dashboard-nearby.test.js",
+		)
+	}
+
+tasks.named("check") {
+	dependsOn(dashboardJsTest)
 }
 
 val testSourceSet = sourceSets["test"]

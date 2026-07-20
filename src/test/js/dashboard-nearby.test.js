@@ -4,6 +4,7 @@ const assert = require("node:assert/strict");
 const test = require("node:test");
 
 const {
+    canonicalizeCoordinates,
     normalizeNearbyPerson,
     validNearbyLocation,
     validNearbyPerson,
@@ -50,6 +51,26 @@ test("nearby person rejects a missing or malformed nested location", () => {
             location: { latitude: -36.8485, longitude: 181 },
         }),
         false,
+    );
+});
+
+test("nearby person requires distanceKm to be a finite JSON number", () => {
+    assert.equal(validNearbyPerson({ ...nearbyPerson, distanceKm: null }), false);
+    assert.equal(validNearbyPerson({ ...nearbyPerson, distanceKm: "1.2" }), false);
+    assert.equal(
+        validNearbyPerson({ ...nearbyPerson, distanceKm: Number.NaN }),
+        false,
+    );
+});
+
+test("coordinates match the backend canonical representation", () => {
+    assert.deepEqual(
+        canonicalizeCoordinates({ latitude: -0, longitude: 180 }),
+        { latitude: 0, longitude: -180 },
+    );
+    assert.deepEqual(
+        canonicalizeCoordinates({ latitude: 90, longitude: 42 }),
+        { latitude: 90, longitude: 0 },
     );
 });
 

@@ -198,9 +198,11 @@ existing and seeded people returned by the search. Selecting either a map point
 or a nearby result opens the person's details in a floating window, independent
 of the result-list length. `POST /persons` and
 `PUT /persons/{id}/location` response shapes remain unchanged and do not return
-coordinates. The browser keeps a tab-local mapping in `sessionStorage` only to
-remember which people this tab may move; markers learned only from a nearby
-response are visible but not draggable. Closing the tab ends that page session.
+coordinates. The browser keeps only a tab-local set of draggable person IDs in
+`sessionStorage`; profile details and coordinates stay in memory and are
+rehydrated from nearby results after a reload. Markers learned only from a
+nearby response are visible but not draggable. Closing the tab ends that page
+session.
 **Forget tab map data** clears only that browser mapping—it does not delete
 people or location observations from the backend, and a later nearby search can
 display their last-known locations again.

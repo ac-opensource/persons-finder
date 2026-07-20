@@ -2,7 +2,7 @@
     "use strict";
 
     const STORAGE_KEY = "persons-finder.dashboard.v1";
-    const STORAGE_VERSION = 1;
+    const STORAGE_VERSION = 2;
     const DEFAULT_CENTER = Object.freeze({
         latitude: -36.8485,
         longitude: 174.7633,
@@ -44,6 +44,7 @@
         renderedNearbyPeople: null,
         renderedNearbyTrackedIds: "",
         sessionPeople: new Map(),
+        movablePersonIds: new Set(),
         nearbyPeople: [],
         nearbyStatus: "idle",
         nearbyAbortController: null,
@@ -265,10 +266,25 @@
     }
 
     function fromLeafletLatLng(latLng) {
-        return {
+        return canonicalizeCoordinates({
             latitude: Math.max(-90, Math.min(90, latLng.lat)),
             longitude: wrapLongitude(latLng.lng),
-        };
+        });
+    }
+
+    function canonicalizeCoordinates(coordinates) {
+        const latitude = Object.is(coordinates.latitude, -0)
+            ? 0
+            : coordinates.latitude;
+        let longitude = Object.is(coordinates.longitude, -0)
+            ? 0
+            : coordinates.longitude;
+        if (latitude === -90 || latitude === 90) {
+            longitude = 0;
+        } else if (longitude === 180) {
+            longitude = -180;
+        }
+        return { latitude, longitude };
     }
 
     function parseCoordinates(latitudeValue, longitudeValue) {
@@ -283,7 +299,7 @@
         if (!isFiniteCoordinate(latitude, longitude)) {
             return null;
         }
-        return { latitude, longitude };
+        return canonicalizeCoordinates({ latitude, longitude });
     }
 
     function formatCoordinate(value, precision = 6) {
@@ -560,7 +576,7 @@
         };
     }
 
-    function loadSessionPeople() {
+    function loadMovablePersonIds() {
         try {
             const raw = window.sessionStorage.getItem(STORAGE_KEY);
             if (!raw) {
@@ -569,51 +585,45 @@
             const stored = JSON.parse(raw);
             if (
                 stored?.version !== STORAGE_VERSION ||
-                !Array.isArray(stored.people)
+                !Array.isArray(stored.movablePersonIds)
             ) {
                 window.sessionStorage.removeItem(STORAGE_KEY);
                 return;
             }
 
-            stored.people
+            stored.movablePersonIds
                 .slice(0, MAX_SESSION_PEOPLE)
-                .map(normalizeSessionPerson)
-                .filter(Boolean)
-                .forEach((person) => state.sessionPeople.set(person.id, person));
+                .filter(
+                    (personId) =>
+                        typeof personId === "string" &&
+                        UUID_PATTERN.test(personId),
+                )
+                .forEach((personId) => state.movablePersonIds.add(personId));
         } catch (_ignored) {
             state.storageAvailable = false;
             showAppStatus(
-                "Tab storage is unavailable. Map positions will last only until this page reloads.",
+                "Tab storage is unavailable. Draggable-person permissions will last only until this page reloads.",
                 "warning",
             );
         }
     }
 
-    function persistSessionPeople() {
+    function persistMovablePersonIds() {
         if (!state.storageAvailable) {
             return;
         }
 
-        const people = Array.from(state.sessionPeople.values()).map((person) => ({
-            id: person.id,
-            name: person.name,
-            jobTitle: person.jobTitle,
-            hobbies: [...person.hobbies],
-            bio: person.bio,
-            createdAt: person.createdAt,
-            lastKnownLocationAt: person.lastKnownLocationAt,
-            latitude: person.latitude,
-            longitude: person.longitude,
-        }));
+        const movablePersonIds = Array.from(state.movablePersonIds)
+            .slice(0, MAX_SESSION_PEOPLE);
         try {
             window.sessionStorage.setItem(
                 STORAGE_KEY,
-                JSON.stringify({ version: STORAGE_VERSION, people }),
+                JSON.stringify({ version: STORAGE_VERSION, movablePersonIds }),
             );
         } catch (_ignored) {
             state.storageAvailable = false;
             showAppStatus(
-                "Tab storage is full or unavailable. New map positions will not survive a reload.",
+                "Tab storage is full or unavailable. Draggable-person permissions will not survive a reload.",
                 "warning",
             );
         }
@@ -621,6 +631,7 @@
 
     function forgetSessionPeople() {
         state.sessionPeople.clear();
+        state.movablePersonIds.clear();
         state.selectedPersonId = null;
         state.pendingLocationIds.clear();
         try {
@@ -1308,6 +1319,7 @@
         state.pendingCreateCoordinates = coordinates;
         ui.createForm.reset();
         resetHobbyRows();
+        clearCreateCoordinateValidity();
         ui.createLatitude.value = formatCoordinate(coordinates.latitude);
         ui.createLongitude.value = formatCoordinate(coordinates.longitude);
         setCounter(ui.nameCount, ui.personName, PROFILE_LIMITS.name);
@@ -1352,7 +1364,13 @@
         return { hobbies, invalidInput: null, message: "" };
     }
 
+    function clearCreateCoordinateValidity() {
+        ui.createLatitude?.setCustomValidity("");
+        ui.createLongitude?.setCustomValidity("");
+    }
+
     function validCreatePayload() {
+        clearCreateCoordinateValidity();
         const name = validateProfileText(
             ui.personName,
             "Name",
@@ -1388,15 +1406,22 @@
         if (!coordinates) {
             const message =
                 "Latitude must be -90 to 90 and longitude -180 to 180.";
-            ui.createLatitude.setCustomValidity(message);
-            ui.createLatitude.reportValidity();
-            ui.createLatitude.focus();
+            const latitude = Number(ui.createLatitude.value);
+            const invalidLatitude =
+                ui.createLatitude.value.trim() === "" ||
+                !Number.isFinite(latitude) ||
+                latitude < -90 ||
+                latitude > 90;
+            const invalidInput = invalidLatitude
+                ? ui.createLatitude
+                : ui.createLongitude;
+            invalidInput.setCustomValidity(message);
+            invalidInput.reportValidity();
+            invalidInput.focus();
             setCreateError(message);
             return null;
         }
 
-        ui.createLatitude.setCustomValidity("");
-        ui.createLongitude.setCustomValidity("");
         return {
             request: {
                 name: name.value,
@@ -1452,8 +1477,9 @@
             }
 
             state.sessionPeople.set(person.id, person);
+            state.movablePersonIds.add(person.id);
             state.selectedPersonId = person.id;
-            persistSessionPeople();
+            persistMovablePersonIds();
             closeDialog(ui.createDialog);
             renderAll();
             if (state.map) {
@@ -1521,7 +1547,6 @@
                 currentPerson.longitude = coordinates.longitude;
                 currentPerson.lastKnownLocationAt =
                     response.lastKnownLocationAt;
-                persistSessionPeople();
             }
             showToast(
                 `${safeDisplayText(person.name, "Person", 80)} moved to the new location.`,
@@ -1567,7 +1592,8 @@
                 typeof value.bio === "string" &&
                 typeof value.lastKnownLocationAt === "string" &&
                 validNearbyLocation(value.location) &&
-                Number.isFinite(Number(value.distanceKm)),
+                typeof value.distanceKm === "number" &&
+                Number.isFinite(value.distanceKm),
         );
     }
 
@@ -1591,14 +1617,22 @@
             lastKnownLocationAt: value.lastKnownLocationAt,
             latitude: value.location.latitude,
             longitude: value.location.longitude,
-            distanceKm: Number(value.distanceKm),
+            distanceKm: value.distanceKm,
         };
     }
 
     function synchronizeTrackedLocations(nearbyPeople) {
-        let changed = false;
         nearbyPeople.forEach((nearbyPerson) => {
-            const trackedPerson = state.sessionPeople.get(nearbyPerson.id);
+            let trackedPerson = state.sessionPeople.get(nearbyPerson.id);
+            if (
+                !trackedPerson &&
+                state.movablePersonIds.has(nearbyPerson.id)
+            ) {
+                trackedPerson = normalizeSessionPerson(nearbyPerson);
+                if (trackedPerson) {
+                    state.sessionPeople.set(trackedPerson.id, trackedPerson);
+                }
+            }
             if (!trackedPerson) {
                 return;
             }
@@ -1612,12 +1646,8 @@
                 trackedPerson.longitude = nearbyPerson.longitude;
                 trackedPerson.lastKnownLocationAt =
                     nearbyPerson.lastKnownLocationAt;
-                changed = true;
             }
         });
-        if (changed) {
-            persistSessionPeople();
-        }
     }
 
     function scheduleNearbySearch(immediate = false) {
@@ -2247,10 +2277,10 @@
             setCounter(ui.jobCount, ui.personJob, PROFILE_LIMITS.jobTitle);
         });
         ui.createLatitude?.addEventListener("input", () => {
-            ui.createLatitude.setCustomValidity("");
+            clearCreateCoordinateValidity();
         });
         ui.createLongitude?.addEventListener("input", () => {
-            ui.createLongitude.setCustomValidity("");
+            clearCreateCoordinateValidity();
         });
         ui.createCancel?.addEventListener("click", () =>
             closeDialog(ui.createDialog),
@@ -2279,7 +2309,7 @@
     function initialize() {
         collectDom();
         bindEvents();
-        loadSessionPeople();
+        loadMovablePersonIds();
         initializeMap();
 
         if (ui.radiusInput) {
@@ -2307,6 +2337,7 @@
 
     if (typeof module !== "undefined" && module.exports) {
         module.exports = Object.freeze({
+            canonicalizeCoordinates,
             isFiniteCoordinate,
             normalizeNearbyPerson,
             validNearbyLocation,

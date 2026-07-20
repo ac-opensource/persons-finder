@@ -84,6 +84,7 @@ require_command java
 require_command docker
 require_command curl
 require_command jq
+require_command node
 require_command openssl
 
 JAVA_SPECIFICATION_VERSION="$(

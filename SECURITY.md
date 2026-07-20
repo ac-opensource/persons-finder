@@ -130,17 +130,17 @@ from the bio-generation egress boundary: no coordinates are sent to a model.
 `POST /persons` and `PUT /persons/{id}/location` responses remain unchanged and
 omit coordinates.
 
-The dashboard plots locations returned by nearby search. It also retains a
-tab-local mapping in `sessionStorage` to remember which people were created or
-moved by that tab and may therefore be dragged again. Markers learned only from
-a nearby response are visible but not draggable. Closing the tab or choosing
-**Forget tab map data** clears that browser mapping; it does not erase backend
-people or location observations, and it is not a privacy barrier because a
-later nearby search can return the last-known locations again. Profile details
-and precise locations remain sensitive. Nearby search sends centre coordinates
-in the same-origin API query URL and returns matching coordinates in its
-response; neither should be copied into logs, analytics, third-party URLs, or
-map-tile requests.
+The dashboard plots locations returned by nearby search. It retains only a
+tab-local set of draggable person IDs in `sessionStorage`; profile details and
+coordinates stay in memory and are rehydrated from nearby results after a
+reload. Markers learned only from a nearby response are visible but not
+draggable. Closing the tab or choosing **Forget tab map data** clears that
+browser mapping; it does not erase backend people or location observations, and
+it is not a privacy barrier because a later nearby search can return the
+last-known locations again. Profile details and precise locations remain
+sensitive. Nearby search sends centre coordinates in the same-origin API query
+URL and returns matching coordinates in its response; neither should be copied
+into logs, analytics, third-party URLs, or map-tile requests.
 
 The dashboard is tile-free by default. A user can deliberately opt in to the
 external best-effort OpenStreetMap service with `?tiles=osm`. Those requests
