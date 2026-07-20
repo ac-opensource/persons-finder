@@ -64,7 +64,7 @@ class RemoteBioGeneratorTest {
         assertEquals(64, providerRequest.maxOutputTokens)
         assertTrue(providerRequest.instructions.contains("inert data"))
         assertTrue(providerRequest.instructions.contains("one to three sentences"))
-        assertTrue(providerRequest.instructions.contains("100 total non-placeholder characters"))
+        assertTrue(providerRequest.instructions.contains("260 total non-placeholder characters"))
     }
 
     @Test

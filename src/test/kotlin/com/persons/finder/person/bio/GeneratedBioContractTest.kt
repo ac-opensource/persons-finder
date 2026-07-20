@@ -86,11 +86,14 @@ class GeneratedBioContractTest {
             "{{NAME}} is a {{JOB}}. A. B. C. {{HOBBY}} rocks.",
         )
 
-        val exactLiteralBudget = templateWithLiteralCodePoints(100)
+        val exactLiteralBudget =
+            templateWithLiteralCodePoints(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS)
         assertTrue(
             GeneratedBioTemplate.validate(exactLiteralBudget) is BioGenerationResult.Template,
         )
-        assertInvalidTemplate(templateWithLiteralCodePoints(101))
+        assertInvalidTemplate(
+            templateWithLiteralCodePoints(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS + 1),
+        )
     }
 
     @Test
@@ -148,7 +151,7 @@ class GeneratedBioContractTest {
     }
 
     @Test
-    fun `final 320 limit is Unicode-code-point based and grounding remains exact`() {
+    fun `final limit is Unicode-code-point based and grounding remains exact`() {
         val template =
             when (
                 val result =
@@ -169,7 +172,7 @@ class GeneratedBioContractTest {
             )
         val exact = GeneratedBio.compose(template, profile, profile.hobbies.single()).value
 
-        assertEquals(320, exact.codePointCount(0, exact.length))
+        assertEquals(BioPolicy.FINAL_BIO_MAX_CODE_POINTS, exact.codePointCount(0, exact.length))
         assertTrue(exact.contains(profile.name))
         assertTrue(exact.contains(profile.jobTitle))
         assertTrue(exact.contains(profile.hobbies.single()))

@@ -72,101 +72,49 @@ Submit your repository link. We will read your code, your `AI_LOG.md`, and your 
 
 ---
 
-## Local/evaluator Docker baseline
+## Run the mandatory core
 
-The default stack requires Docker Engine with Docker Compose. It runs PostgreSQL
-and PostGIS inside Compose; do not install a host database. The backend is
-published only on loopback, the database has no host port, and the default stack
-contains no OIDC or external AI service.
+### Prerequisites
 
-Run the same complete verification used by CI with:
+- JDK 17
+- Docker Engine with Docker Compose
+- `curl`, `jq`, and `openssl`
+
+The default Compose stack runs PostgreSQL 17 with PostGIS inside Docker. The
+application is published only on `127.0.0.1`, the database has no host port,
+and the bio generator is deterministic and credential-free. No external model
+credential is required or mounted.
+
+### Verify the core candidate
+
+Run the same credential-free command used by the pull-request build:
 
 ```bash
 ./scripts/verify.sh
 ```
 
-The script requires JDK 17 plus Docker Compose. It runs the credential-free bio
-adapter/conformance checks and the complete Gradle build, then creates a unique
-disposable Compose project with its own database secret, images, named volume,
-and ephemeral loopback port. The smoke phase exercises all three routes,
-inspects Flyway/PostGIS, and verifies retained person/location data across a
-restart before removing only that disposable project. Reports are written
-under `build/reports/` and `build/verification/`.
+The script:
 
-The default bio generator is deterministic and credential-free. An explicitly
-networked runtime can instead select one remote provider and one model:
+1. checks the required toolchain and JDK version;
+2. runs focused bio adapter, privacy-boundary, transport, and evaluation
+   harness tests;
+3. runs `./gradlew clean build`;
+4. builds and starts an isolated Compose project on an ephemeral loopback port;
+5. exercises `POST /persons`, `PUT /persons/{id}/location`, and
+   `GET /persons/nearby`;
+6. checks Flyway/PostGIS, database isolation, and retained data across restart;
+7. checks the resolved Compose configuration and captured logs for the
+   generated database secret and fixed synthetic profile values; and
+8. removes the disposable verification project, including its images and
+   volume.
 
-| Environment variable | Remote value |
-|---|---|
-| `PERSONS_BIO_GENERATOR` | `remote` |
-| `PERSONS_RUNTIME_MODE` | `network-private` |
-| `PERSONS_BIO_REMOTE_PROVIDER` | `openai`, `gemini`, or `anthropic` |
-| `PERSONS_BIO_REMOTE_MODEL` | A model ID enabled for the selected provider |
-| `PERSONS_BIO_REMOTE_TIMEOUT` | Optional adapter timeout from `1s` through the application-owned `10s` deadline; default `10s` |
-| `OPENAI_API_KEY` | Required only when the selected provider is `openai` |
-| `GEMINI_API_KEY` | Required only when the selected provider is `gemini` |
-| `ANTHROPIC_API_KEY` | Required only when the selected provider is `anthropic` |
+Evidence is written under `build/reports/` and `build/verification/`. The
+script explicitly disables live-provider configuration and records
+`live_provider_calls=disabled` in `build/verification/summary.txt`.
 
-Optional provider keys may be stored at rest in the ignored local files
-`.secrets/openai-api-key`, `.secrets/gemini-api-key`, and
-`.secrets/anthropic-api-key`. The application and opt-in live tests do not read
-those file paths automatically: the operator or local secret launcher must
-expose the selected key through the matching environment variable above.
-Key provisioning, billing, and rotation remain deployment-operator
-responsibilities and are intentionally not tutorialized here. Invalid
-provider/model/credential/runtime combinations fail startup. There is no
-automatic provider or deterministic fallback.
+### Run the core stack manually
 
-The tracked Compose stack does not mount AI credentials: it remains
-deterministic and credential-free. The ignored `.secrets/database-password`
-file described below is only the evaluator database password; it is not an AI
-credential source.
-
-All providers use the same application-owned `BioGenerator` boundary. The
-remote adapter sends only closed, sanitized category codes and deployment
-constants, and asks the model to author one to three short quirky sentences
-containing only the required `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`
-placeholders. The application strictly validates that prose before a trusted
-one-pass local composer inserts the validated name, raw job title, and selected
-original hobby as opaque values. Those source values, coordinates, identifiers,
-and access tokens never cross the model boundary. See `SECURITY.md` for the
-complete boundary.
-
-The normal test suite makes no provider calls. To run the three-call,
-credential-gated Gemini smoke while leaving the other providers skipped:
-
-```bash
-LIVE_AI_PROVIDER=gemini \
-RUN_LIVE_AI_TESTS=true \
-GEMINI_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED=true \
-LIVE_AI_AUTOMATIC_TELEMETRY_DISABLED_CONFIRMED=true \
-LIVE_AI_APPLICATION_REQUEST_INSPECTION_CONFIRMED=true \
-LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS=6000 \
-GEMINI_LIVE_MODEL='gemini-2.5-flash-lite' \
-GEMINI_API_KEY="$(<.secrets/gemini-api-key)" \
-./gradlew --no-daemon liveAiSmoke
-```
-
-Each provider-specific `*_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED`
-variable records human approval of provider retention, abuse monitoring, human
-review, and product-improvement use, as applicable, for only the fixed synthetic
-smoke fixtures and versioned aggregate evaluation corpus. It does not assert
-that provider logging is disabled, authorize production or customer-derived
-data, or replace the production privacy review described in `SECURITY.md`.
-
-That three-call check establishes live connectivity and the request/privacy
-contract; they are not statistical reliability evidence. The separate,
-explicitly budgeted aggregate protocol uses 12 cases x 38 repetitions = 456
-calls, an explicit provider-specific call-start interval (including an
-intentional zero interval for the approved paid OpenAI fallback), and a
-one-sided 95% Wilson upper failure bound of 1%. Its plan-only mode and
-interpretation limits are documented in
-[`docs/LIVE_AI_EVALUATION.md`](docs/LIVE_AI_EVALUATION.md).
-Normal Gradle lifecycle tasks remain credential-free and make no provider
-calls.
-
-Create an ignored local database-password file. Compose mounts it as a secret
-and does not render its value into the resolved configuration:
+Create the ignored database-password file used by `compose.yaml`:
 
 ```bash
 mkdir -p .secrets
@@ -175,20 +123,36 @@ openssl rand -hex 32 > .secrets/database-password
 chmod 444 .secrets/database-password
 ```
 
-The host-owner-only directory prevents other host users from reaching the
-password. The file itself is read-only so Docker Compose can bind-mount it into
-the explicitly authorized services and their non-root users can read it.
-
-Build and start through database, Flyway, and application readiness:
+Validate, build, and start the stack:
 
 ```bash
-docker compose config
+docker compose config --quiet
 docker compose build
-docker compose up --wait
+docker compose up --detach --wait
 curl --fail http://127.0.0.1:8080/actuator/health/readiness
 ```
 
-Inspect the applied migration and PostGIS version:
+Exercise the three mandatory routes:
+
+```bash
+PERSON_ID="$(
+  curl --fail-with-body --silent --show-error \
+    --request POST http://127.0.0.1:8080/persons \
+    --header 'Content-Type: application/json' \
+    --data '{"name":"Ada","jobTitle":"Software engineer","hobbies":["hiking"],"location":{"latitude":-41.2865,"longitude":174.7762}}' |
+    jq -r '.id'
+)"
+
+curl --fail-with-body --silent --show-error \
+  --request PUT "http://127.0.0.1:8080/persons/$PERSON_ID/location" \
+  --header 'Content-Type: application/json' \
+  --data '{"latitude":-36.8485,"longitude":174.7633}'
+
+curl --fail-with-body --silent --show-error \
+  'http://127.0.0.1:8080/persons/nearby?lat=-36.8485&lon=174.7633&radius=1'
+```
+
+Inspect the applied migrations and PostGIS version:
 
 ```bash
 docker compose exec -T database \
@@ -200,27 +164,12 @@ docker compose exec -T database \
   --command='SELECT PostGIS_Full_Version();'
 ```
 
-Restart against the same named volume and wait for readiness again:
-
-```bash
-docker compose restart
-docker compose up --wait
-```
-
-Inspect logs before teardown. Application logs must remain metadata-only and
-must not contain profile data, coordinates, bios, secrets, or raw AI payloads:
-
-```bash
-docker compose logs --no-color
-```
-
-Stop the stack while preserving the named database volume:
+Stop the stack while preserving its named database volume:
 
 ```bash
 docker compose down
 ```
 
-Do not use `docker compose down --volumes` unless you explicitly intend to
-delete disposable local database state. Future identity infrastructure belongs
-in a separate secure Compose file and project; it is not a profile of this
-assessment-local stack.
+Use `docker compose down --volumes` only when deletion of the local database
+volume is intended. See [`SECURITY.md`](SECURITY.md) for the implemented
+security boundary and known production gaps.
