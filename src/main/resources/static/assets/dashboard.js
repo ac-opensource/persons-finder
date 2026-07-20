@@ -12,6 +12,7 @@
     const NEARBY_LIST_PAGE_SIZE = 250;
     const NEARBY_MARKER_BATCH_SIZE = 500;
     const MAX_SESSION_PEOPLE = 500;
+    const MAX_BIO_CODE_POINTS = 732;
     const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
     const TILE_ATTRIBUTION =
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';
@@ -543,7 +544,11 @@
             name,
             jobTitle,
             hobbies,
-            bio: safeDisplayText(value.bio, "Bio unavailable.", 240),
+            bio: safeDisplayText(
+                value.bio,
+                "Bio unavailable.",
+                MAX_BIO_CODE_POINTS,
+            ),
             createdAt:
                 typeof value.createdAt === "string" ? value.createdAt : "",
             lastKnownLocationAt:
@@ -966,15 +971,20 @@
         };
         state.nearbyMarkerLayer = window.L.layerGroup().addTo(state.map);
 
-        const tilesDisabled =
-            new URLSearchParams(window.location.search).get("tiles") === "off";
-        if (tilesDisabled) {
+        const externalTilesEnabled =
+            new URLSearchParams(window.location.search).get("tiles") === "osm";
+        if (!externalTilesEnabled) {
             if (ui.tileWarning) {
                 ui.tileWarning.textContent =
-                    "Basemap disabled for this session. API tools and all location markers still work.";
+                    "Basemap disabled by default to prevent third-party location egress. Add ?tiles=osm to opt in; API tools and markers still work.";
             }
             setHidden(ui.tileWarning, false);
         } else {
+            if (ui.tileWarning) {
+                ui.tileWarning.textContent =
+                    "OpenStreetMap basemap enabled by opt-in. The viewed area is sent to its public tile service.";
+            }
+            setHidden(ui.tileWarning, false);
             state.tileLayer = window.L.tileLayer(TILE_URL, {
                 attribution: TILE_ATTRIBUTION,
                 maxZoom: 19,
@@ -985,10 +995,11 @@
                 detectRetina: false,
             });
             state.tileLayer.on("tileerror", () => {
+                if (ui.tileWarning) {
+                    ui.tileWarning.textContent =
+                        "The opted-in OpenStreetMap basemap is unavailable. API tools and markers still work.";
+                }
                 setHidden(ui.tileWarning, false);
-            });
-            state.tileLayer.on("tileload", () => {
-                setHidden(ui.tileWarning, true);
             });
             state.tileLayer.addTo(state.map);
         }
@@ -1570,7 +1581,11 @@
                 .map((hobby) => safeDisplayText(hobby, "", 60))
                 .filter(Boolean)
                 .slice(0, PROFILE_LIMITS.hobbies),
-            bio: safeDisplayText(value.bio, "Bio unavailable.", 240),
+            bio: safeDisplayText(
+                value.bio,
+                "Bio unavailable.",
+                MAX_BIO_CODE_POINTS,
+            ),
             createdAt:
                 typeof value.createdAt === "string" ? value.createdAt : "",
             lastKnownLocationAt: value.lastKnownLocationAt,

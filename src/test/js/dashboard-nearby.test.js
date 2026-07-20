@@ -61,3 +61,10 @@ test("nearby person normalization retains map coordinates", () => {
     assert.equal(normalized.distanceKm, 1.2);
     assert.equal(normalized.name, "Aroha");
 });
+
+test("nearby person normalization retains a full contract-sized bio", () => {
+    const bio = "A".repeat(732);
+    const normalized = normalizeNearbyPerson({ ...nearbyPerson, bio });
+
+    assert.equal(normalized.bio, bio);
+});

@@ -142,14 +142,15 @@ in the same-origin API query URL and returns matching coordinates in its
 response; neither should be copied into logs, analytics, third-party URLs, or
 map-tile requests.
 
-The default basemap loads OpenStreetMap tiles from an external best-effort
-service. Those requests disclose the tile zoom/column/row (`z/x/y`) and the
-browser referrer, which together can reveal the approximate viewed area. They
-do not include person profiles, bios, identifiers, API payloads, or the
-dashboard's tab-retained coordinate mapping. A sensitive deployment must use a
-privacy-approved or self-hosted tile provider and comply with that provider's
-usage policy rather than treating the public tile service as an availability
-dependency.
+The dashboard is tile-free by default. A user can deliberately opt in to the
+external best-effort OpenStreetMap service with `?tiles=osm`. Those requests
+disclose the tile zoom/column/row (`z/x/y`) and the browser referrer, which
+together can reveal the approximate viewed area. They do not include person
+profiles, bios, identifiers, API payloads, or the dashboard's tab-retained
+coordinate mapping. A sensitive deployment must keep external tiles disabled
+or use a privacy-approved or self-hosted provider and comply with that
+provider's usage policy rather than treating the public tile service as an
+availability dependency.
 
 The evaluator-default backend is unauthenticated and exposed only on loopback.
 It has no application-level authentication, per-person authorization, or rate

@@ -9,6 +9,7 @@ from pathlib import Path
 
 
 ROOT_FILES = (
+    ".dockerignore",
     "Dockerfile",
     "Dockerfile.postgis",
     "build.gradle.kts",

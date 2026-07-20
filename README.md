@@ -266,6 +266,10 @@ response discloses exact last-known locations, so do not publish this dashboard
 or API beyond a trusted local environment without authentication, per-person
 authorization, abuse controls, and an approved location-disclosure policy.
 
-The basemap uses OpenStreetMap's public tile service, so viewing the map makes
-network requests to that service. See `SECURITY.md` for the data boundary and
-deployment caveats.
+The dashboard is tile-free by default, so ordinary map interaction does not
+send the viewed area to a third-party basemap. To deliberately opt in to
+OpenStreetMap's public tile service for a local demo, open
+<http://127.0.0.1:8080/?tiles=osm> (or use port `18081` for the seeded stack).
+That opt-in makes network requests which disclose the viewed tile area and
+browser referrer. See `SECURITY.md` for the data boundary and deployment
+caveats.
