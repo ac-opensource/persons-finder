@@ -22,8 +22,10 @@ class BioPolicy {
                 ?: mappedHobbies.first().original
         requireCompositionFits(profile, selectedHobby)
 
+        val sourceValues = sourceValuesForInspection(profile)
         if (
-            sourceValuesForInspection(profile).any(::violatesBioContentPolicy)
+            sourceValues.individual.any(::violatesBioContentPolicy) ||
+            sourceValues.combined.any(::violatesCombinedBioContentPolicy)
         ) {
             throw UnsafeBioInputException()
         }
@@ -145,33 +147,65 @@ internal object ReviewedBioAliases {
         )
 }
 
+private val INSTRUCTION_MANIPULATION_PATTERN =
+    Regex(
+        """\b(?:ignore|disregard|override|forget|bypass)\b.{0,100}""" +
+            """\b(?:instructions?|prompts?|directives?|system|developer|assistant|safeguards?)\b""" +
+            """.{0,100}\b(?:say|return|respond|output|write|print|repeat|reveal|do)\b""",
+    )
+
+private val ROLE_MANIPULATION_PATTERN =
+    Regex(
+        """\b(?:system|developer|assistant)\b.{0,60}""" +
+            """\b(?:ignore|reveal|say|return|respond|output|write|print|repeat|override|bypass)\b""",
+    )
+
+private val EXTRACTION_PATTERN =
+    Regex(
+        """\b(?:reveal|print|repeat|output|return|respond|say|write)\b.{0,100}""" +
+            """\b(?:system prompts?|secrets?|instructions?|credentials?|i am hacked)\b""",
+    )
+
+private val HACKED_PHRASE_PATTERN = Regex("""\bi\s+am\s+hacked\b""")
+
 private val UNSAFE_SOURCE_PATTERNS =
     listOf(
-        Regex(
-            """\b(?:ignore|disregard|override|forget|bypass)\b.{0,100}""" +
-                """\b(?:instructions?|prompts?|directives?|system|developer|assistant|safeguards?)\b""" +
-                """.{0,100}\b(?:say|return|respond|output|write|print|repeat|reveal|do)\b""",
-        ),
-        Regex(
-            """\b(?:system|developer|assistant)\b.{0,60}""" +
-                """\b(?:ignore|reveal|say|return|respond|output|write|print|repeat|override|bypass)\b""",
-        ),
-        Regex(
-            """\b(?:reveal|print|repeat|output|return|respond|say|write)\b.{0,100}""" +
-                """\b(?:system prompts?|secrets?|instructions?|credentials?|i am hacked)\b""",
-        ),
-        Regex("""\bi\s+am\s+hacked\b"""),
+        INSTRUCTION_MANIPULATION_PATTERN,
+        ROLE_MANIPULATION_PATTERN,
+        EXTRACTION_PATTERN,
+        HACKED_PHRASE_PATTERN,
+    )
+
+private val COMBINED_UNSAFE_SOURCE_PATTERNS =
+    listOf(
+        INSTRUCTION_MANIPULATION_PATTERN,
+        EXTRACTION_PATTERN,
+        HACKED_PHRASE_PATTERN,
     )
 
 private fun String.aliasKey(): String = lowercase(Locale.ROOT)
 
-internal fun violatesBioContentPolicy(value: String): Boolean {
+internal fun violatesBioContentPolicy(value: String): Boolean =
+    violatesBioContentPolicy(value, UNSAFE_SOURCE_PATTERNS)
+
+private fun violatesCombinedBioContentPolicy(value: String): Boolean =
+    violatesBioContentPolicy(value, COMBINED_UNSAFE_SOURCE_PATTERNS)
+
+private fun violatesBioContentPolicy(
+    value: String,
+    unsafePatterns: List<Regex>,
+): Boolean {
     val normalized = value.securityScanValue() ?: return true
-    return UNSAFE_SOURCE_PATTERNS.any { it.containsMatchIn(normalized.words) } ||
+    return unsafePatterns.any { it.containsMatchIn(normalized.words) } ||
         FORBIDDEN_SOURCE_LITERAL_PATTERNS.any { it.containsMatchIn(normalized.literal) }
 }
 
-private fun sourceValuesForInspection(profile: PersonProfile): List<String> {
+private data class SourceValuesForInspection(
+    val individual: List<String>,
+    val combined: List<String>,
+)
+
+private fun sourceValuesForInspection(profile: PersonProfile): SourceValuesForInspection {
     val individual = listOf(profile.jobTitle) + profile.hobbies
     val adjacent =
         individual
@@ -180,7 +214,10 @@ private fun sourceValuesForInspection(profile: PersonProfile): List<String> {
                 listOf("$first $second", first + second)
             }
     val complete = listOf(individual.joinToString(" "), individual.joinToString(""))
-    return individual + adjacent + complete
+    return SourceValuesForInspection(
+        individual = individual,
+        combined = adjacent + complete,
+    )
 }
 
 private data class SecurityScanValue(
@@ -193,10 +230,14 @@ private fun String.securityScanValue(): SecurityScanValue? {
     val normalized =
         Normalizer
             .normalize(decoded, Normalizer.Form.NFKC)
+            .let { compatibilityNormalized ->
+                Normalizer.normalize(compatibilityNormalized, Normalizer.Form.NFD)
+            }
             .codePoints()
             .toArray()
             .asSequence()
             .filterNot(::isDefaultIgnorableForInspection)
+            .filterNot(::isCombiningMarkForInspection)
             .map(::inspectionCodePoint)
             .joinToString(separator = "") { codePoint -> String(Character.toChars(codePoint)) }
             .lowercase(Locale.ROOT)
@@ -240,6 +281,16 @@ private fun isDefaultIgnorableForInspection(codePoint: Int): Boolean {
         codePoint in STANDARD_VARIATION_SELECTORS ||
         codePoint in SUPPLEMENTARY_VARIATION_SELECTORS
 }
+
+private fun isCombiningMarkForInspection(codePoint: Int): Boolean =
+    when (Character.getType(codePoint)) {
+        Character.NON_SPACING_MARK.toInt(),
+        Character.COMBINING_SPACING_MARK.toInt(),
+        Character.ENCLOSING_MARK.toInt(),
+        -> true
+
+        else -> false
+    }
 
 private val FORBIDDEN_SOURCE_LITERAL_PATTERNS =
     listOf(

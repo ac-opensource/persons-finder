@@ -15,10 +15,13 @@ external audit or certification.
   NFC form. Controls, line/paragraph separators, malformed text, and most
   Unicode format controls are rejected; ZWJ and ZWNJ remain allowed for
   legitimate scripts and emoji.
-- A separate NFKC security view of job titles and hobbies is checked for the
-  approved narrow instruction-manipulation and explicit credential/identifier
-  patterns. Ordinary validation failures return 400; unsafe bio source input
-  returns 422.
+- A separate NFKC security view of job titles and hobbies is canonically
+  decomposed with combining marks, default-ignorable characters, and variation
+  selectors removed, then checked individually and across field boundaries for
+  the approved narrow instruction-manipulation and explicit
+  credential/identifier patterns. Names are not scanned because they never
+  enter remote generation. Ordinary validation failures return 400; unsafe bio
+  source input returns 422.
 - Error responses use bounded `application/problem+json` fields and stable
   codes. They do not include submitted values, coordinates, stack traces, or
   provider details.

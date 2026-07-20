@@ -117,6 +117,34 @@ class GeneratedBioContractTest {
         assertTrue(bio.contains("\\d+ [a-z]*"))
     }
 
+    @TestFactory
+    fun `sentence punctuation in opaque source is not reinterpreted after composition`():
+        List<DynamicTest> =
+        BioTemplateId.entries.map { templateId ->
+            DynamicTest.dynamicTest(templateId.wireValue) {
+                val grounding =
+                    BioGrounding(
+                        name = "Synthetic Ltd.",
+                        jobTitle = "Engineer. Team lead",
+                        hobby = "board games? Sometimes",
+                    )
+
+                val bio =
+                    GeneratedBio.compose(
+                        GeneratedBioTemplate.fromCatalog(templateId),
+                        grounding,
+                    ).value
+
+                assertTrue(bio.contains(grounding.name))
+                assertTrue(bio.contains(grounding.jobTitle))
+                assertTrue(bio.contains(grounding.hobby))
+                assertTrue(
+                    bio.codePointCount(0, bio.length) <=
+                        BioPolicy.FINAL_BIO_MAX_CODE_POINTS,
+                )
+            }
+        }
+
     @Test
     fun `composer preserves legitimate Unicode and joiners as opaque source`() {
         val template = GeneratedBioTemplate.fromCatalog(BioTemplateId.QUIRKY_SIDE_QUEST)

@@ -230,8 +230,10 @@ application boundary independently requires exactly one each of `{{NAME}}`,
 `{{JOB}}`, and `{{HOBBY}}`, no unknown token, one to three safe sentences,
 printable ASCII, at most 512 non-placeholder code points, and no forbidden
 region disclosure. A trusted parser renders validated source values once as
-opaque segments, verifies exact grounding, and revalidates the final
-one-to-three-sentence, 732-code-point contract before persistence.
+opaque segments, verifies exact grounding, and checks the final 732-code-point
+contract before persistence. The one-to-three-sentence rule applies to the
+model-authored template; punctuation inside opaque source values is not
+reparsed as model-authored sentence structure.
 
 The opt-in network adapter preserves this allowlist, logs metadata only,
 normalizes failures, and never silently falls back. Unknown adapter

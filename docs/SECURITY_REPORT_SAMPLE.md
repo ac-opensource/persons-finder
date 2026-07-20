@@ -169,8 +169,8 @@ report does not claim that control is implemented.
 | Duplicate, extra, trailing, or non-string provider output | `INVALID_OUTPUT` | Remote adapter tests |
 | Oversized provider response | Subscription cancelled and failure normalized | HTTP transport and provider-client tests |
 | Missing, duplicate, mutated, escaped, wrapped, or unknown placeholder | `BIO_GENERATION_INVALID`; no writes | Application template and transaction tests |
-| Placeholder-looking or regex-significant source | Inserted once as opaque data and revalidated | Trusted-composer tests |
-| Any validated prose/job/interest combination | One to three safe grounded sentences of at most 732 Unicode code points | Prose-property, mapping, composer, and bounds tests |
+| Placeholder-looking, sentence-punctuated, or regex-significant source | Inserted once as opaque data; exact grounding and the final bound are checked without reparsing source punctuation | Trusted-composer tests |
+| Any validated prose/job/interest combination | A one-to-three-sentence model-authored template and a grounded bio of at most 732 Unicode code points | Prose-property, mapping, composer, and bounds tests |
 | Bio policy, provider, parsing, or rendering failure | No person, observation, or projection write | Application and real PostGIS tests |
 
 ## Residual risks and next actions

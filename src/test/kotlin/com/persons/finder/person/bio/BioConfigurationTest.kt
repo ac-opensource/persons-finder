@@ -47,16 +47,20 @@ class BioConfigurationTest {
                     timeout = Duration.ofMillis(999),
                 )
             },
-            {
-                remoteGenerator(
-                    provider = "openai",
-                    timeout = BIO_GENERATION_DEADLINE.plusNanos(1),
-                )
-            },
         ).forEach { configuration ->
             assertThrows(BeanCreationException::class.java) {
                 configuration()
             }
+        }
+    }
+
+    @Test
+    fun `remote timeout rejects values above the application-owned deadline`() {
+        assertThrows(BeanCreationException::class.java) {
+            remoteGenerator(
+                provider = "openai",
+                timeout = BIO_GENERATION_DEADLINE.plusNanos(1),
+            )
         }
     }
 
