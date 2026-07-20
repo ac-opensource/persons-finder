@@ -2,7 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-19
-- Delivery state: POST and PUT implemented; nearby remains planned
+- Delivery state: POST, PUT, and nearby implemented
 
 ## Context
 
@@ -255,13 +255,13 @@ observation, and projection.
 
 ## Out of scope
 
-The public nearby HTTP endpoint, its GiST index/migration, complete spatial-edge
-evidence, authentication, mobile code, and deferred product features are
-outside this slice. The nearby query port and JDBC/PostGIS
-adapter are structured separately so that follow-on work cannot grow the shared
-command repository. Retention, erasure, purge repair, post-purge replay,
-restore, receipt/HMAC design, and key rotation remain lifecycle questions
-requiring separate human approval.
+The one-million-row bonus benchmark, authentication,
+mobile code, and deferred product features remain outside the mandatory
+contract slice. The nearby query port and JDBC/PostGIS adapter stay structured
+separately so that search does not grow the shared command repository.
+Retention, erasure, purge repair, post-purge replay, restore, receipt/HMAC
+design, and key rotation remain lifecycle questions requiring separate human
+approval.
 
 ## Planned evidence
 
@@ -271,5 +271,6 @@ requiring separate human approval.
   template parsing/composition, timestamps, and coordinates.
 - Fresh real-PostGIS Flyway/schema checks plus transaction, rollback, keyed
   replay/conflict, late-event, and concurrent no-key evidence.
-- Focused real-PostGIS evidence for the separately owned nearby query adapter;
-  its public controller, GiST plan, and full edge matrix remain follow-on work.
+- Focused real-PostGIS evidence for the separately owned nearby query adapter,
+  public controller, GiST plan, exact spheroidal oracle, and spatial edge
+  matrix.
