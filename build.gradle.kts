@@ -32,7 +32,6 @@ dependencies {
 	implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:3.0.3")
 	runtimeOnly("org.flywaydb:flyway-database-postgresql")
 	runtimeOnly("org.postgresql:postgresql")
-	testRuntimeOnly("com.h2database:h2")
 	testImplementation("org.springframework.boot:spring-boot-testcontainers")
 	testImplementation("org.springframework.boot:spring-boot-starter-test")
 	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
@@ -51,4 +50,12 @@ tasks.withType<KotlinCompile>().configureEach {
 
 tasks.withType<Test> {
 	useJUnitPlatform()
+	doFirst {
+		val colimaSocket =
+			file("${System.getProperty("user.home")}/.colima/default/docker.sock")
+		if (System.getenv("DOCKER_HOST") == null && colimaSocket.exists()) {
+			environment("DOCKER_HOST", "unix://$colimaSocket")
+			environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
+		}
+	}
 }
