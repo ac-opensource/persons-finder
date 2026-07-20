@@ -269,6 +269,7 @@ wait_for_stack() {
 }
 
 wait_for_verified_run_stack() {
+    compose stop app app-sample
     compose up --detach --no-build --wait database
     assert_resolved_config
     assert_container_identity

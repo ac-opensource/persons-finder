@@ -69,7 +69,9 @@ therefore use `reset`, `seed`, then `run`.
 Creating or moving a person through the seeded dashboard changes the benchmark
 database. The `run` preflight rejects changed seed cardinalities, identity, or
 projection state. After an interactive dashboard demo, use `reset` and `seed`
-again before measuring, and do not modify the dashboard while `run` is active.
+again before measuring. `run` stops both benchmark application services before
+its database-only seed and source checks, then starts only the newly verified
+application image; do not modify the dashboard while `run` is active.
 
 ## Hypotheses and falsification thresholds
 

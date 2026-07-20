@@ -77,6 +77,7 @@ Submit your repository link. We will read your code, your `AI_LOG.md`, and your 
 ### Prerequisites
 
 - JDK 17
+- Node.js 18 or newer
 - Docker Engine with Docker Compose
 - `curl`, `jq`, and `openssl`
 
@@ -96,8 +97,8 @@ Run the same credential-free command used by the pull-request build:
 The script:
 
 1. checks the required toolchain and JDK version;
-2. runs focused bio adapter, privacy-boundary, transport, and evaluation
-   harness tests;
+2. runs focused dashboard, bio adapter, privacy-boundary, transport, and
+   evaluation harness tests;
 3. runs `./gradlew clean build`;
 4. builds and starts an isolated Compose project on an ephemeral loopback port;
 5. exercises `POST /persons`, `PUT /persons/{id}/location`, and
