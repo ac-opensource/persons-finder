@@ -15,7 +15,7 @@
 | Code scope | Current working tree; no release or commit hash asserted |
 | Primary concern | Prompt injection, PII egress, unsafe model output, and failure atomicity |
 | Verification command | `./gradlew test --console=plain` |
-| Recorded result | 213 tests: 210 passed, 0 failed, 3 intentionally skipped live-provider evaluations |
+| Recorded result | 265 tests: 262 passed, 0 failed, 3 intentionally skipped live-provider evaluations |
 
 ## Executive summary
 
@@ -24,13 +24,13 @@ sentence. Its hard security boundary is structural:
 
 1. raw profile values map locally to closed job and interest codes;
 2. only those codes and fixed deployment constants can enter the model request;
-3. a provider can return only one closed application-owned template ID;
-4. the application resolves and independently validates a three-placeholder template;
+3. a provider authors only one structured prose template;
+4. the application independently validates its placeholders, content, sentence count, and bounds;
 5. trusted local code inserts validated source values once as opaque segments; and
 6. generation, composition, and validation finish before persistence begins.
 
 The exact challenge attack, normalized and zero-width-joiner variants, bidi
-controls, free-form provider prose, ambiguous JSON, oversized provider
+controls, hostile provider prose, ambiguous JSON, oversized provider
 responses, and failure-with-partial-write scenarios are covered by automated
 checks. The remaining material deployment prerequisite is to keep opt-in remote
 generation behind authenticated, rate-limited ingress.
@@ -50,7 +50,7 @@ Included:
 
 Excluded:
 
-- a live-provider rerun of the current closed-template-ID contract;
+- a live-provider rerun of the current model-authored-prose contract;
 - internet-facing authentication, authorization, and per-caller quotas;
 - third-party provider contractual, retention, residency, and subprocessor
   review;
@@ -80,11 +80,12 @@ location, identifier, credential, or arbitrary customer text. Exact local
 aliases map input to closed `SafeJobCode` and `SafeInterestCode` values.
 Unmatched or sensitive values degrade to `other`.
 
-The remote result is only a closed `BioTemplateId`, resolved to an
-application-owned template. The application validates exactly one each of
-`{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, parses literal/token segments, and
-inserts validated source strings once as opaque local data. They cannot enter
-the provider request and are never rescanned after insertion.
+The remote result is one model-authored `bio_template` string. The application
+validates exactly one each of `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, one to
+three safe sentences, printable ASCII, and the 100-code-point literal budget,
+then parses literal/token segments and inserts validated source strings once as
+opaque local data. They cannot enter the provider request and are never
+rescanned after insertion.
 
 Evidence:
 
@@ -110,16 +111,16 @@ Evidence:
 - [`BioPolicyTest.kt`](../src/test/kotlin/com/persons/finder/person/bio/BioPolicyTest.kt)
 - [`PersonModelTest.kt`](../src/test/kotlin/com/persons/finder/person/model/PersonModelTest.kt)
 
-### SR-003: Provider-authored prose or ambiguous JSON could cross the boundary
+### SR-003: Unsafe provider-authored prose or ambiguous JSON could cross the boundary
 
 - Initial severity: High
-- Status: Mitigated by closed remote output and independent validation
+- Status: Mitigated by strict structured output and independent validation
 
 Remote providers receive a strict JSON schema whose only property is
-`template_id`, selected from the application-owned enum. The application caps
-the extracted output, enables duplicate-key detection, and rejects malformed
-or trailing JSON, extra fields, non-string values, unknown IDs, Unicode-spoofed
-IDs, and legacy free-form templates.
+`bio_template`. The application caps the extracted output, enables duplicate-key
+detection, and rejects malformed or trailing JSON, extra fields, non-string
+values, missing or mutated placeholders, more than three sentences, excessive
+literal or final length, policy violations, and unsafe Unicode.
 
 Evidence:
 
@@ -163,30 +164,40 @@ report does not claim that control is implemented.
 | NFKC/full-width attack spelling | Rejected before generation | Bio policy tests |
 | Attack term split with ZWJ or ZWNJ | Rejected before generation | Bio policy and privacy-boundary tests |
 | Bidi override, isolate, or invisible format control | Sanitized 400 before service invocation | Domain and controller tests |
-| Free-form or legacy provider prose | `INVALID_OUTPUT` | Remote adapter tests |
-| Duplicate, extra, trailing, non-string, or unknown provider output | `INVALID_OUTPUT` | Remote adapter tests |
+| Unsafe or structurally invalid provider prose | `INVALID_OUTPUT` or `POLICY_REJECTED` | Remote adapter tests |
+| Duplicate, extra, trailing, or non-string provider output | `INVALID_OUTPUT` | Remote adapter tests |
 | Oversized provider response | Subscription cancelled and failure normalized | HTTP transport and provider-client tests |
 | Missing, duplicate, mutated, escaped, wrapped, or unknown placeholder | `BIO_GENERATION_INVALID`; no writes | Application template and transaction tests |
 | Placeholder-looking or regex-significant source | Inserted once as opaque data and revalidated | Trusted-composer tests |
-| Any closed template/job/interest combination | One safe grounded sentence of at most 240 Unicode code points | Exhaustive catalog, mapping, composer, and bounds tests |
+| Any validated prose/job/interest combination | One to three safe grounded sentences of at most 320 Unicode code points | Prose-property, mapping, composer, and bounds tests |
 | Bio policy, provider, parsing, or rendering failure | No person, observation, or projection write | Application and real PostGIS tests |
 
 ## Residual risks and next actions
 
-1. Run all gated live-provider evaluations for the current closed-ID schema
-   only after the opt-in, approved credentials/models, disabled provider content
-   logging and telemetry, and complete-envelope prerequisites are confirmed.
-2. Keep remote mode on private networking until authenticated, rate-limited
+1. Run all gated live-provider evaluations for the current prose schema
+   only after the opt-in, approved credentials/models, provider-specific
+   synthetic retention/data-use approval, disabled automatic content telemetry,
+   and application-owned request inspection prerequisites are confirmed. The
+   approval accepts provider data use only for the fixed synthetic smoke
+   fixtures and versioned aggregate corpus; it neither claims logging is
+   disabled nor authorizes customer/production data.
+2. Precommit the separate three-call smoke and the 456-call aggregate run:
+   12 cases x 38 repetitions and a one-sided 95% Wilson upper failure bound at
+   or below 1%. Pace the Gemini free-tier plan by at least 6,000 milliseconds
+   between attempt starts; explicitly use a zero interval for the approved paid
+   OpenAI fallback. At most one aggregate failure passes; do not retry, top up,
+   or pool providers.
+3. Keep remote mode on private networking until authenticated, rate-limited
    ingress and cost budgets are implemented and tested.
-3. Complete provider privacy, retention, residency, subprocessor, and incident
+4. Complete provider privacy, retention, residency, subprocessor, and incident
    response review before production use.
-4. Perform independent infrastructure and abuse-case testing before treating
+5. Perform independent infrastructure and abuse-case testing before treating
    this sample as a production security assessment.
 
 ## Conclusion
 
 Within the assessed bio-generation path, the primary controls are data
-minimization, closed remote output, strict application validation, one-pass
+minimization, strict structured remote output, deterministic validation, one-pass
 local composition, and transactional persistence—not trust in model
 instructions or a claim that a blacklist solves prompt injection. Source
 detection is intentionally narrow and can remain probabilistic outside the

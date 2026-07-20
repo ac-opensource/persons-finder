@@ -67,14 +67,14 @@ split an attack term. Limits count Unicode code points:
 - `jobTitle`: 1 to 80
 - `hobbies`: 1 to 10 items
 - each hobby: 1 to 60
-- selected `name` + `jobTitle` + grounding hobby: at most 206
+- selected `name` + `jobTitle` + grounding hobby: at most 220
 
 Exact canonical hobby duplicates are removed after the raw 10-item cap,
 preserving first-input order. Case-folding and fuzzy matching are not used for
-stored source values. The selected-value aggregate reserves 34 code points for
-the minimum approved grammatical-template overhead. The resulting 206-code-
-point bound proves that at least one compliant local composition can fit before
-generation is attempted.
+stored source values. The 220-code-point selected-value maximum follows directly
+from the individual field limits. Generated prose may contribute at most 100
+non-placeholder code points, so every accepted grounding fits the 320-code-point
+final bio contract.
 
 ### Location updates
 
@@ -223,15 +223,15 @@ guarantee; content detection is additional defence only. `macroRegion` is
 always omitted in this slice. Locale/country are deployment output context and
 never assert customer location, nationality, or identity.
 
-Remote provider output is only one exact `BioTemplateId` from a closed
-application-owned enum. The remote adapter caps and strictly parses the JSON,
-rejecting duplicate or extra fields, trailing content, non-string values, and
-unknown IDs, then resolves the ID to an application-owned
-`GeneratedBioTemplate`. The application boundary independently requires
-exactly one each of `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, no unknown token,
-one safe sentence, and no forbidden region disclosure. A trusted parser renders
-validated source values once as opaque segments, verifies exact grounding, and
-revalidates the final sentence and 240-code-point limit before persistence.
+Remote provider output is one strict `bio_template` JSON string authored by the
+selected model. The remote adapter caps and strictly parses the JSON, rejecting
+duplicate or extra fields, trailing content, and non-string values. The
+application boundary independently requires exactly one each of `{{NAME}}`,
+`{{JOB}}`, and `{{HOBBY}}`, no unknown token, one to three safe sentences,
+printable ASCII, at most 100 non-placeholder code points, and no forbidden
+region disclosure. A trusted parser renders validated source values once as
+opaque segments, verifies exact grounding, and revalidates the final
+one-to-three-sentence, 320-code-point contract before persistence.
 
 The opt-in network adapter preserves this allowlist, logs metadata only,
 normalizes failures, and never silently falls back. Unknown adapter

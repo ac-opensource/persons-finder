@@ -9,6 +9,8 @@ import com.persons.finder.person.bio.GeneratedBioTemplate
 import com.persons.finder.person.bio.SafeInterestCode
 import com.persons.finder.person.bio.SafeJobCode
 import com.persons.finder.person.bio.UnsafeBioInputException
+import com.persons.finder.person.bio.remote.eval.MinimumAttemptStartPacer
+import com.persons.finder.person.bio.remote.eval.requireLiveBioEvalMinimumCallInterval
 import com.persons.finder.person.model.PersonProfile
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
@@ -22,8 +24,10 @@ import tools.jackson.databind.json.JsonMapper
 
 /**
  * Explicitly opt-in provider evaluations. They use synthetic source data, never persist
- * application state, capture the application-owned outbound envelope without printing
- * credentials or provider content, and require affirmative provider-account controls.
+ * application state, capture the application-owned outbound request without printing
+ * credentials or provider content. The operator explicitly approves provider retention
+ * and data use, as applicable, only for these fixed synthetic smoke fixtures and the
+ * versioned aggregate evaluation corpus.
  */
 class RemoteBioGeneratorLiveTest {
     private val objectMapper = JsonMapper.builder().build()
@@ -49,8 +53,8 @@ class RemoteBioGeneratorLiveTest {
                 objectMapper,
             )
 
-        runLiveEvaluation(generator, transport)
-        assertCompleteEnvelope(
+        runLiveEvaluation(generator, transport, prerequisites.minimumCallInterval)
+        assertApplicationOwnedRequest(
             requests = transport.requests,
             host = "api.openai.com",
             path = "/v1/responses",
@@ -79,8 +83,8 @@ class RemoteBioGeneratorLiveTest {
                 objectMapper,
             )
 
-        runLiveEvaluation(generator, transport)
-        assertCompleteEnvelope(
+        runLiveEvaluation(generator, transport, prerequisites.minimumCallInterval)
+        assertApplicationOwnedRequest(
             requests = transport.requests,
             host = "generativelanguage.googleapis.com",
             path = "/v1beta/models/${prerequisites.model}:generateContent",
@@ -109,8 +113,8 @@ class RemoteBioGeneratorLiveTest {
                 objectMapper,
             )
 
-        runLiveEvaluation(generator, transport)
-        assertCompleteEnvelope(
+        runLiveEvaluation(generator, transport, prerequisites.minimumCallInterval)
+        assertApplicationOwnedRequest(
             requests = transport.requests,
             host = "api.anthropic.com",
             path = "/v1/messages",
@@ -121,8 +125,10 @@ class RemoteBioGeneratorLiveTest {
     private fun runLiveEvaluation(
         generator: BioGenerator,
         transport: CapturingTransport,
+        minimumCallInterval: Duration,
     ) {
         val policy = BioPolicy()
+        val pacer = MinimumAttemptStartPacer(minimumCallInterval)
         val cases =
             listOf(
                 ExpectedLiveCase(
@@ -167,6 +173,7 @@ class RemoteBioGeneratorLiveTest {
             assertEquals(testCase.expectedInterests, prepared.request.interests)
 
             val requestsBefore = transport.requests.size
+            pacer.awaitAttemptStart()
             val template =
                 when (val result = generator.generate(prepared.request)) {
                     is BioGenerationResult.Template -> result.value
@@ -197,7 +204,7 @@ class RemoteBioGeneratorLiveTest {
         assertEquals(requestsBeforeAttack, transport.requests.size)
     }
 
-    private fun assertCompleteEnvelope(
+    private fun assertApplicationOwnedRequest(
         requests: List<ProviderHttpRequest>,
         host: String,
         path: String,
@@ -236,7 +243,7 @@ class RemoteBioGeneratorLiveTest {
         request: ProviderHttpRequest,
         profile: PersonProfile,
     ) {
-        val completeEnvelope =
+        val completeRequest =
             buildString {
                 append(request.uri)
                 request.headers.forEach { (name, value) ->
@@ -246,11 +253,11 @@ class RemoteBioGeneratorLiveTest {
                 append(request.body)
             }
         (listOf(profile.name, profile.jobTitle) + profile.hobbies).forEach { source ->
-            assertFalse(completeEnvelope.contains(source), source)
+            assertFalse(completeRequest.contains(source), source)
         }
-        assertTrue(completeEnvelope.contains("\\\"display_name\\\":\\\"{{NAME}}\\\""))
-        assertTrue(completeEnvelope.contains("\\\"locale\\\":\\\"en-NZ\\\""))
-        assertTrue(completeEnvelope.contains("\\\"country_code\\\":\\\"NZ\\\""))
+        assertTrue(completeRequest.contains("\\\"display_name\\\":\\\"{{NAME}}\\\""))
+        assertTrue(completeRequest.contains("\\\"locale\\\":\\\"en-NZ\\\""))
+        assertTrue(completeRequest.contains("\\\"country_code\\\":\\\"NZ\\\""))
     }
 
     private fun requireLivePrerequisites(
@@ -258,25 +265,29 @@ class RemoteBioGeneratorLiveTest {
         credentialName: String,
         modelName: String,
     ): LivePrerequisites {
-        requireConfirmation(
-            "RUN_LIVE_AI_TESTS",
-            "Set RUN_LIVE_AI_TESTS=true to authorize billable provider calls",
+        val explicitlyRequired = System.getProperty(LIVE_AI_SMOKE_REQUIRED_PROPERTY) == "true"
+        val liveRunAuthorized = System.getenv("RUN_LIVE_AI_TESTS") == "true"
+        if (!explicitlyRequired) {
+            assumeTrue(
+                liveRunAuthorized,
+                "Live provider tests require RUN_LIVE_AI_TESTS=true",
+            )
+        }
+        require(liveRunAuthorized) {
+            "The dedicated live AI smoke requires RUN_LIVE_AI_TESTS=true"
+        }
+        val selectedProvider = LiveAiTestAuthorization.selectedProvider(System::getenv)
+        assumeTrue(
+            selectedProvider == provider,
+            "$provider is not the explicitly selected live AI provider",
         )
-        requireConfirmation(
-            "${provider}_LIVE_CONTENT_LOGGING_DISABLED_CONFIRMED",
-            "Confirm provider content logging is disabled for the evaluation account",
-        )
-        requireConfirmation(
-            "LIVE_AI_AUTOMATIC_TELEMETRY_DISABLED_CONFIRMED",
-            "Confirm automatic content telemetry is disabled",
-        )
-        requireConfirmation(
-            "LIVE_AI_COMPLETE_ENVELOPE_INSPECTION_CONFIRMED",
-            "Confirm the captured application-owned HTTP envelope is sufficient evidence",
-        )
+        LiveAiTestAuthorization.requirements(provider).forEach { requirement ->
+            requireConfirmation(requirement.environmentName, requirement.reason)
+        }
         return LivePrerequisites(
             credential = requireValue(credentialName),
             model = requireValue(modelName),
+            minimumCallInterval = requireLiveBioEvalMinimumCallInterval(System::getenv),
         )
     }
 
@@ -284,13 +295,17 @@ class RemoteBioGeneratorLiveTest {
         name: String,
         reason: String,
     ) {
-        assumeTrue(System.getenv(name) == "true", "$reason ($name=true)")
+        require(System.getenv(name) == "true") {
+            "$reason ($name=true)"
+        }
     }
 
     private fun requireValue(name: String): String {
         val value = System.getenv(name)
-        assumeTrue(!value.isNullOrBlank(), "$name is required for this live test")
-        return requireNotNull(value)
+        require(!value.isNullOrBlank() && value == value.trim()) {
+            "$name is required and must not have surrounding whitespace"
+        }
+        return value
     }
 
     private data class ExpectedLiveCase(
@@ -302,7 +317,12 @@ class RemoteBioGeneratorLiveTest {
     private data class LivePrerequisites(
         val credential: String,
         val model: String,
+        val minimumCallInterval: Duration,
     )
+
+    private companion object {
+        const val LIVE_AI_SMOKE_REQUIRED_PROPERTY = "liveAiSmoke.required"
+    }
 
     private class CapturingTransport(
         private val delegate: ProviderHttpTransport,

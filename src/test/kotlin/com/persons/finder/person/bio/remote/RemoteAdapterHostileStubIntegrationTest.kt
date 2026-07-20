@@ -32,7 +32,7 @@ class RemoteAdapterHostileStubIntegrationTest {
     private val objectMapper = JsonMapper.builder().build()
 
     @Test
-    fun `every real network adapter builds an allowlisted envelope and completes trusted local grounding`() {
+    fun `every real network adapter builds an allowlisted application-owned request and completes trusted local grounding`() {
         adapterCases(VALID_PROVIDER_OUTPUT).forEach { adapter ->
             val repository = RecordingRepository()
             val service = createService(repository, adapter.generator)
@@ -44,7 +44,7 @@ class RemoteAdapterHostileStubIntegrationTest {
             assertTrue(bio.contains(SYNTHETIC_NAME), adapter.name)
             assertTrue(bio.contains(SYNTHETIC_JOB), adapter.name)
             assertTrue(bio.contains(SYNTHETIC_HOBBY), adapter.name)
-            assertCompleteEnvelope(adapter)
+            assertApplicationOwnedRequest(adapter)
         }
     }
 
@@ -58,13 +58,13 @@ class RemoteAdapterHostileStubIntegrationTest {
                 val outcome = createService(repository, adapter.generator).execute(createCommand())
 
                 assertEquals(
-                    CreatePersonOutcome.BioGenerationInvalid(BioGenerationFailure.INVALID_OUTPUT),
+                    CreatePersonOutcome.BioGenerationInvalid(BioGenerationFailure.POLICY_REJECTED),
                     outcome,
                     adapter.name,
                 )
                 assertEquals(1, adapter.transport.invocations, adapter.name)
                 assertEquals(PersistenceCounts(0, 0, 0), repository.counts(), adapter.name)
-                assertCompleteEnvelope(adapter)
+                assertApplicationOwnedRequest(adapter)
             }
         }
         val logs = output.out + output.err
@@ -108,7 +108,7 @@ class RemoteAdapterHostileStubIntegrationTest {
         }
     }
 
-    private fun assertCompleteEnvelope(adapter: AdapterCase) {
+    private fun assertApplicationOwnedRequest(adapter: AdapterCase) {
         val request = requireNotNull(adapter.transport.request)
         assertEquals("POST", request.method)
         assertEquals("https", request.uri.scheme)
@@ -299,10 +299,11 @@ class RemoteAdapterHostileStubIntegrationTest {
         const val SYNTHETIC_NAME = "Synthetic Person"
         const val SYNTHETIC_JOB = "Software engineer"
         const val SYNTHETIC_HOBBY = "hiking"
-        const val VALID_PROVIDER_OUTPUT = """{"template_id":"quirky_side_quest"}"""
+        const val VALID_PROVIDER_OUTPUT =
+            """{"bio_template":"{{NAME}} turns {{HOBBY}} into a quirky side quest after a day as a {{JOB}}."}"""
         const val FORBIDDEN_PROVIDER_OUTPUT =
-            """{"template":"{{NAME}} is {{JOB}} who enjoys {{HOBBY}} and says I am hacked."}"""
+            """{"bio_template":"{{NAME}} says I am hacked while {{HOBBY}} as a {{JOB}}."}"""
         const val PROMPT_LEAK_PROVIDER_OUTPUT =
-            """{"template":"The system prompt says {{NAME}} is {{JOB}} who enjoys {{HOBBY}}."}"""
+            """{"bio_template":"The system prompt guides {{NAME}} through {{HOBBY}} as a {{JOB}}."}"""
     }
 }

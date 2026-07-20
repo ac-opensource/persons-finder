@@ -79,6 +79,20 @@ and PostGIS inside Compose; do not install a host database. The backend is
 published only on loopback, the database has no host port, and the default stack
 contains no OIDC or external AI service.
 
+Run the same complete verification used by CI with:
+
+```bash
+./scripts/verify.sh
+```
+
+The script requires JDK 17 plus Docker Compose. It runs the credential-free bio
+adapter/conformance checks and the complete Gradle build, then creates a unique
+disposable Compose project with its own database secret, images, named volume,
+and ephemeral loopback port. The smoke phase exercises all three routes,
+inspects Flyway/PostGIS, and verifies retained person/location data across a
+restart before removing only that disposable project. Reports are written
+under `build/reports/` and `build/verification/`.
+
 The default bio generator is deterministic and credential-free. An explicitly
 networked runtime can instead select one remote provider and one model:
 
@@ -110,29 +124,46 @@ credential source.
 
 All providers use the same application-owned `BioGenerator` boundary. The
 remote adapter sends only closed, sanitized category codes and deployment
-constants, and allows the model to select only a closed application-owned
-template ID. The application resolves that ID to a validated three-placeholder
-template, then a trusted one-pass local composer inserts the validated name,
-raw job title, and selected original hobby as opaque values. Those source
-values, coordinates, identifiers, and access tokens never cross the model
-boundary. See `SECURITY.md` for the complete boundary.
+constants, and asks the model to author one to three short quirky sentences
+containing only the required `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`
+placeholders. The application strictly validates that prose before a trusted
+one-pass local composer inserts the validated name, raw job title, and selected
+original hobby as opaque values. Those source values, coordinates, identifiers,
+and access tokens never cross the model boundary. See `SECURITY.md` for the
+complete boundary.
 
-The normal test suite makes no provider calls. To run the billable,
-credential-gated live adapter smoke tests:
+The normal test suite makes no provider calls. To run the three-call,
+credential-gated Gemini smoke while leaving the other providers skipped:
 
 ```bash
+LIVE_AI_PROVIDER=gemini \
 RUN_LIVE_AI_TESTS=true \
-OPENAI_LIVE_CONTENT_LOGGING_DISABLED_CONFIRMED=true \
-GEMINI_LIVE_CONTENT_LOGGING_DISABLED_CONFIRMED=true \
-ANTHROPIC_LIVE_CONTENT_LOGGING_DISABLED_CONFIRMED=true \
+GEMINI_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED=true \
 LIVE_AI_AUTOMATIC_TELEMETRY_DISABLED_CONFIRMED=true \
-LIVE_AI_COMPLETE_ENVELOPE_INSPECTION_CONFIRMED=true \
-OPENAI_LIVE_MODEL='<enabled-openai-model>' \
-GEMINI_LIVE_MODEL='<enabled-gemini-model>' \
-ANTHROPIC_LIVE_MODEL='<enabled-anthropic-model>' \
-./gradlew test \
-  --tests 'com.persons.finder.person.bio.remote.RemoteBioGeneratorLiveTest'
+LIVE_AI_APPLICATION_REQUEST_INSPECTION_CONFIRMED=true \
+LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS=6000 \
+GEMINI_LIVE_MODEL='gemini-2.5-flash-lite' \
+GEMINI_API_KEY="$(<.secrets/gemini-api-key)" \
+./gradlew --no-daemon liveAiSmoke
 ```
+
+Each provider-specific `*_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED`
+variable records human approval of provider retention, abuse monitoring, human
+review, and product-improvement use, as applicable, for only the fixed synthetic
+smoke fixtures and versioned aggregate evaluation corpus. It does not assert
+that provider logging is disabled, authorize production or customer-derived
+data, or replace the production privacy review described in `SECURITY.md`.
+
+That three-call check establishes live connectivity and the request/privacy
+contract; they are not statistical reliability evidence. The separate,
+explicitly budgeted aggregate protocol uses 12 cases x 38 repetitions = 456
+calls, an explicit provider-specific call-start interval (including an
+intentional zero interval for the approved paid OpenAI fallback), and a
+one-sided 95% Wilson upper failure bound of 1%. Its plan-only mode and
+interpretation limits are documented in
+[`docs/LIVE_AI_EVALUATION.md`](docs/LIVE_AI_EVALUATION.md).
+Normal Gradle lifecycle tasks remain credential-free and make no provider
+calls.
 
 Create an ignored local database-password file. Compose mounts it as a secret
 and does not render its value into the resolved configuration:

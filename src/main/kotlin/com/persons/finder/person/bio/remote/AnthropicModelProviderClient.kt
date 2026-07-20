@@ -92,12 +92,12 @@ internal class AnthropicModelProviderClient(
                 return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
             }
         if (
-            body.path("type").stringValue() != "message" ||
-            body.path("role").stringValue() != "assistant"
+            body.textValue("type") != "message" ||
+            body.textValue("role") != "assistant"
         ) {
             return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
         }
-        return when (body.path("stop_reason").stringValue()) {
+        return when (body.textValue("stop_reason")) {
             "end_turn" -> extractCompletedOutput(body)
             "refusal" -> ModelProviderResult.Failure(BioGenerationFailure.POLICY_REJECTED)
             "max_tokens" -> ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
@@ -108,7 +108,7 @@ internal class AnthropicModelProviderClient(
     private fun extractCompletedOutput(body: JsonNode): ModelProviderResult {
         val texts =
             body.path("content").toList()
-                .filter { it.path("type").stringValue() == "text" }
+                .filter { it.textValue("type") == "text" }
                 .mapNotNull { it.get("text")?.takeIf(JsonNode::isString)?.stringValue() }
         return if (texts.size == 1) {
             ModelProviderResult.Generated(texts.single())
@@ -116,6 +116,9 @@ internal class AnthropicModelProviderClient(
             ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
         }
     }
+
+    private fun JsonNode.textValue(fieldName: String): String? =
+        get(fieldName)?.takeIf(JsonNode::isString)?.stringValue()
 
     private companion object {
         const val API_VERSION = "2023-06-01"

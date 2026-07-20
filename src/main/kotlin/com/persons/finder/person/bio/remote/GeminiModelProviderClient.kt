@@ -97,7 +97,7 @@ internal class GeminiModelProviderClient(
         }
         val candidate = body.path("candidates").firstOrNull()
             ?: return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
-        return when (candidate.path("finishReason").stringValue()) {
+        return when (candidate.textValue("finishReason")) {
             "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST" ->
                 ModelProviderResult.Failure(BioGenerationFailure.POLICY_REJECTED)
 
@@ -118,6 +118,9 @@ internal class GeminiModelProviderClient(
             ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
         }
     }
+
+    private fun JsonNode.textValue(fieldName: String): String? =
+        get(fieldName)?.takeIf(JsonNode::isString)?.stringValue()
 
     private fun modelUri(model: String): URI {
         val encoded = URLEncoder.encode(model, StandardCharsets.UTF_8).replace("+", "%20")

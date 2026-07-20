@@ -10,8 +10,11 @@ class BioPolicy {
             profile.hobbies.map { hobby ->
                 MappedHobby(
                     original = hobby,
-                    code = INTEREST_ALIASES[hobby.aliasKey()] ?: SafeInterestCode.OTHER,
-                    hasReviewedAlias = INTEREST_ALIASES.containsKey(hobby.aliasKey()),
+                    code =
+                        ReviewedBioAliases.interests[hobby.aliasKey()]
+                            ?: SafeInterestCode.OTHER,
+                    hasReviewedAlias =
+                        ReviewedBioAliases.interests.containsKey(hobby.aliasKey()),
                 )
             }
         val selectedHobby =
@@ -29,7 +32,9 @@ class BioPolicy {
         return PreparedBioRequest(
             request =
                 BioTemplateRequest(
-                    jobCategory = JOB_ALIASES[profile.jobTitle.aliasKey()] ?: SafeJobCode.OTHER,
+                    jobCategory =
+                        ReviewedBioAliases.jobs[profile.jobTitle.aliasKey()]
+                            ?: SafeJobCode.OTHER,
                     interests = interests,
                 ),
             selectedHobby = selectedHobby,
@@ -59,10 +64,10 @@ class BioPolicy {
     }
 
     companion object {
-        const val FINAL_BIO_MAX_CODE_POINTS = 240
-        const val MINIMUM_BIO_TEMPLATE_OVERHEAD_CODE_POINTS = 34
+        const val FINAL_BIO_MAX_CODE_POINTS = 320
+        const val MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS = 100
         const val MAX_SELECTED_SOURCE_CODE_POINTS =
-            FINAL_BIO_MAX_CODE_POINTS - MINIMUM_BIO_TEMPLATE_OVERHEAD_CODE_POINTS
+            FINAL_BIO_MAX_CODE_POINTS - MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS
     }
 }
 
@@ -81,62 +86,64 @@ private data class MappedHobby(
     val hasReviewedAlias: Boolean,
 )
 
-private val JOB_ALIASES =
-    mapOf(
-        "software engineer" to SafeJobCode.TECHNOLOGY_ENGINEERING,
-        "software developer" to SafeJobCode.TECHNOLOGY_ENGINEERING,
-        "web developer" to SafeJobCode.TECHNOLOGY_ENGINEERING,
-        "programmer" to SafeJobCode.TECHNOLOGY_ENGINEERING,
-        "doctor" to SafeJobCode.HEALTHCARE,
-        "nurse" to SafeJobCode.HEALTHCARE,
-        "teacher" to SafeJobCode.EDUCATION_RESEARCH,
-        "lecturer" to SafeJobCode.EDUCATION_RESEARCH,
-        "researcher" to SafeJobCode.EDUCATION_RESEARCH,
-        "designer" to SafeJobCode.CREATIVE_MEDIA,
-        "artist" to SafeJobCode.CREATIVE_MEDIA,
-        "writer" to SafeJobCode.CREATIVE_MEDIA,
-        "journalist" to SafeJobCode.CREATIVE_MEDIA,
-        "project manager" to SafeJobCode.BUSINESS_OPERATIONS,
-        "operations manager" to SafeJobCode.BUSINESS_OPERATIONS,
-        "administrator" to SafeJobCode.BUSINESS_OPERATIONS,
-        "accountant" to SafeJobCode.FINANCE_LEGAL,
-        "lawyer" to SafeJobCode.FINANCE_LEGAL,
-        "solicitor" to SafeJobCode.FINANCE_LEGAL,
-        "salesperson" to SafeJobCode.SALES_SERVICE,
-        "customer service representative" to SafeJobCode.SALES_SERVICE,
-        "electrician" to SafeJobCode.TRADES_MANUFACTURING,
-        "plumber" to SafeJobCode.TRADES_MANUFACTURING,
-        "mechanic" to SafeJobCode.TRADES_MANUFACTURING,
-        "carpenter" to SafeJobCode.TRADES_MANUFACTURING,
-        "chef" to SafeJobCode.HOSPITALITY_RETAIL,
-        "barista" to SafeJobCode.HOSPITALITY_RETAIL,
-        "retail assistant" to SafeJobCode.HOSPITALITY_RETAIL,
-        "firefighter" to SafeJobCode.PUBLIC_COMMUNITY_SERVICE,
-        "social worker" to SafeJobCode.PUBLIC_COMMUNITY_SERVICE,
-        "student" to SafeJobCode.STUDENT,
-    )
+internal object ReviewedBioAliases {
+    val jobs: Map<String, SafeJobCode> =
+        mapOf(
+            "software engineer" to SafeJobCode.TECHNOLOGY_ENGINEERING,
+            "software developer" to SafeJobCode.TECHNOLOGY_ENGINEERING,
+            "web developer" to SafeJobCode.TECHNOLOGY_ENGINEERING,
+            "programmer" to SafeJobCode.TECHNOLOGY_ENGINEERING,
+            "doctor" to SafeJobCode.HEALTHCARE,
+            "nurse" to SafeJobCode.HEALTHCARE,
+            "teacher" to SafeJobCode.EDUCATION_RESEARCH,
+            "lecturer" to SafeJobCode.EDUCATION_RESEARCH,
+            "researcher" to SafeJobCode.EDUCATION_RESEARCH,
+            "designer" to SafeJobCode.CREATIVE_MEDIA,
+            "artist" to SafeJobCode.CREATIVE_MEDIA,
+            "writer" to SafeJobCode.CREATIVE_MEDIA,
+            "journalist" to SafeJobCode.CREATIVE_MEDIA,
+            "project manager" to SafeJobCode.BUSINESS_OPERATIONS,
+            "operations manager" to SafeJobCode.BUSINESS_OPERATIONS,
+            "administrator" to SafeJobCode.BUSINESS_OPERATIONS,
+            "accountant" to SafeJobCode.FINANCE_LEGAL,
+            "lawyer" to SafeJobCode.FINANCE_LEGAL,
+            "solicitor" to SafeJobCode.FINANCE_LEGAL,
+            "salesperson" to SafeJobCode.SALES_SERVICE,
+            "customer service representative" to SafeJobCode.SALES_SERVICE,
+            "electrician" to SafeJobCode.TRADES_MANUFACTURING,
+            "plumber" to SafeJobCode.TRADES_MANUFACTURING,
+            "mechanic" to SafeJobCode.TRADES_MANUFACTURING,
+            "carpenter" to SafeJobCode.TRADES_MANUFACTURING,
+            "chef" to SafeJobCode.HOSPITALITY_RETAIL,
+            "barista" to SafeJobCode.HOSPITALITY_RETAIL,
+            "retail assistant" to SafeJobCode.HOSPITALITY_RETAIL,
+            "firefighter" to SafeJobCode.PUBLIC_COMMUNITY_SERVICE,
+            "social worker" to SafeJobCode.PUBLIC_COMMUNITY_SERVICE,
+            "student" to SafeJobCode.STUDENT,
+        )
 
-private val INTEREST_ALIASES =
-    mapOf(
-        "hiking" to SafeInterestCode.OUTDOORS_NATURE,
-        "tramping" to SafeInterestCode.OUTDOORS_NATURE,
-        "running" to SafeInterestCode.SPORTS_FITNESS,
-        "cycling" to SafeInterestCode.SPORTS_FITNESS,
-        "pottery" to SafeInterestCode.ARTS_CRAFTS,
-        "painting" to SafeInterestCode.ARTS_CRAFTS,
-        "guitar" to SafeInterestCode.MUSIC,
-        "piano" to SafeInterestCode.MUSIC,
-        "reading" to SafeInterestCode.READING_WRITING,
-        "creative writing" to SafeInterestCode.READING_WRITING,
-        "espresso" to SafeInterestCode.FOOD_DRINK,
-        "cooking" to SafeInterestCode.FOOD_DRINK,
-        "chess" to SafeInterestCode.GAMES_PUZZLES,
-        "crosswords" to SafeInterestCode.GAMES_PUZZLES,
-        "coding" to SafeInterestCode.TECHNOLOGY_MAKING,
-        "woodworking" to SafeInterestCode.TECHNOLOGY_MAKING,
-        "gardening" to SafeInterestCode.GARDENING,
-        "travel" to SafeInterestCode.TRAVEL,
-    )
+    val interests: Map<String, SafeInterestCode> =
+        mapOf(
+            "hiking" to SafeInterestCode.OUTDOORS_NATURE,
+            "tramping" to SafeInterestCode.OUTDOORS_NATURE,
+            "running" to SafeInterestCode.SPORTS_FITNESS,
+            "cycling" to SafeInterestCode.SPORTS_FITNESS,
+            "pottery" to SafeInterestCode.ARTS_CRAFTS,
+            "painting" to SafeInterestCode.ARTS_CRAFTS,
+            "guitar" to SafeInterestCode.MUSIC,
+            "piano" to SafeInterestCode.MUSIC,
+            "reading" to SafeInterestCode.READING_WRITING,
+            "creative writing" to SafeInterestCode.READING_WRITING,
+            "espresso" to SafeInterestCode.FOOD_DRINK,
+            "cooking" to SafeInterestCode.FOOD_DRINK,
+            "chess" to SafeInterestCode.GAMES_PUZZLES,
+            "crosswords" to SafeInterestCode.GAMES_PUZZLES,
+            "coding" to SafeInterestCode.TECHNOLOGY_MAKING,
+            "woodworking" to SafeInterestCode.TECHNOLOGY_MAKING,
+            "gardening" to SafeInterestCode.GARDENING,
+            "travel" to SafeInterestCode.TRAVEL,
+        )
+}
 
 private val UNSAFE_SOURCE_PATTERNS =
     listOf(

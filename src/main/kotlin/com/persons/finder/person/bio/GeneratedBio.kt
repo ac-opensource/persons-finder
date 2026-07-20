@@ -5,9 +5,8 @@ import java.text.Normalizer
 import java.util.Locale
 
 /**
- * Application-owned validated template. Provider responses never construct
- * this type directly: a remote adapter can only select a closed catalog ID,
- * which is resolved and revalidated inside the application boundary.
+ * Application-owned validated prose template. A remote model may author the
+ * candidate text, but only this deterministic validator can construct the type.
  */
 @JvmInline
 value class GeneratedBioTemplate private constructor(val value: String) {
@@ -35,7 +34,10 @@ value class GeneratedBioTemplate private constructor(val value: String) {
                         BioGenerationFailure.POLICY_REJECTED
                     violatesGeneratedBioContentPolicy(normalized) ->
                         BioGenerationFailure.POLICY_REJECTED
-                    !normalized.isOneSafeSentence() -> BioGenerationFailure.INVALID_OUTPUT
+                    normalized.templateLiteralCodePointCount() >
+                        BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS ->
+                        BioGenerationFailure.INVALID_OUTPUT
+                    !normalized.hasSafeSentenceCount() -> BioGenerationFailure.INVALID_OUTPUT
                     else -> null
                 }
             return if (failure == null) {
@@ -121,7 +123,9 @@ value class GeneratedBio private constructor(val value: String) {
             require(bio.codePoints().noneMatch(::isForbiddenFinalCodePoint)) {
                 "Composed bio contains forbidden controls"
             }
-            require(bio.isOneSafeSentence()) { "Composed bio must be one safe sentence" }
+            require(bio.hasSafeSentenceCount()) {
+                "Composed bio must contain between one and three safe sentences"
+            }
             require(bio.codePointCount(0, bio.length) <= BioPolicy.FINAL_BIO_MAX_CODE_POINTS) {
                 "Composed bio exceeds its final limit"
             }
@@ -197,7 +201,7 @@ private fun hasQuotedOrMarkupWrappedPlaceholder(value: String): Boolean =
         }
     }
 
-private fun String.isOneSafeSentence(): Boolean {
+private fun String.hasSafeSentenceCount(): Boolean {
     if (isBlank()) {
         return false
     }
@@ -205,23 +209,28 @@ private fun String.isOneSafeSentence(): Boolean {
     if (terminal !in SENTENCE_TERMINATORS) {
         return false
     }
-    return !hasUnrecognizedInternalSentenceBoundary(dropLast(1))
+    val internalSentenceBoundaries = recognizedInternalSentenceBoundaryCount(dropLast(1))
+    return internalSentenceBoundaries + 1 <= MAX_BIO_SENTENCES
 }
 
-private fun hasUnrecognizedInternalSentenceBoundary(value: String): Boolean =
-    SENTENCE_BOUNDARY_WITH_CONTINUATION.findAll(value).any { boundary ->
-        if (boundary.groupValues[1] != ".") {
-            true
-        } else {
-            val precedingWord =
-                PRECEDING_WORD
-                    .find(value.substring(0, boundary.range.first))
-                    ?.value
-                    ?.lowercase(Locale.ROOT)
-            precedingWord == null ||
-                (precedingWord.length > 1 && precedingWord !in NON_TERMINAL_PERIOD_WORDS)
-        }
+private fun recognizedInternalSentenceBoundaryCount(value: String): Int =
+    SENTENCE_BOUNDARY_WITH_CONTINUATION.findAll(value).count { boundary ->
+        boundary.groupValues[1] != "." || boundary.isTerminalPeriod(value)
     }
+
+private fun MatchResult.isTerminalPeriod(value: String): Boolean {
+    val precedingWord =
+        PRECEDING_WORD
+            .find(value.substring(0, range.first))
+            ?.value
+            ?.lowercase(Locale.ROOT)
+    return precedingWord == null || precedingWord !in NON_TERMINAL_PERIOD_WORDS
+}
+
+private fun String.templateLiteralCodePointCount(): Int =
+    REQUIRED_TOKENS
+        .fold(this) { current, token -> current.replace(token, "") }
+        .let { literal -> literal.codePointCount(0, literal.length) }
 
 private fun violatesGeneratedBioContentPolicy(value: String): Boolean =
     violatesBioContentPolicy(value) ||
@@ -305,6 +314,9 @@ private val PRECEDING_WORD = Regex("""([\p{L}]+(?:\.[\p{L}]+)*)$""")
 private val NON_TERMINAL_PERIOD_WORDS =
     setOf("dr", "e.g", "i.e", "jr", "mr", "mrs", "ms", "prof", "sr", "st", "vs")
 private val PRINTABLE_ASCII_CODE_POINTS = 0x20..0x7E
-private const val MAX_TEMPLATE_CODE_POINTS = 240
+private val MAX_TEMPLATE_CODE_POINTS =
+    BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS +
+        REQUIRED_TOKENS.sumOf { token -> token.codePointCount(0, token.length) }
+private const val MAX_BIO_SENTENCES = 3
 private const val ZERO_WIDTH_NON_JOINER = 0x200C
 private const val ZERO_WIDTH_JOINER = 0x200D

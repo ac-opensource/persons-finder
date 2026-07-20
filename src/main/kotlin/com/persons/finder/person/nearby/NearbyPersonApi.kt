@@ -11,7 +11,7 @@ data class NearbyPersonResponse(
     val jobTitle: String,
     @field:ArraySchema(schema = Schema(nullable = false))
     val hobbies: List<String>,
-    @field:Schema(minLength = 1, maxLength = 240, pattern = ".*\\S.*")
+    @field:Schema(minLength = 1, maxLength = 320, pattern = ".*\\S.*")
     val bio: String,
     @field:Schema(type = "string", format = "date-time")
     val createdAt: String,

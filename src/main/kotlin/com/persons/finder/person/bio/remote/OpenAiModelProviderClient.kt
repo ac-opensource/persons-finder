@@ -87,7 +87,7 @@ internal class OpenAiModelProviderClient(
             } catch (_: RuntimeException) {
                 return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
             }
-        return when (body.path("status").stringValue()) {
+        return when (body.textValue("status")) {
             "completed" -> extractCompletedOutput(body)
             "incomplete" -> ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
             else -> ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
@@ -98,9 +98,9 @@ internal class OpenAiModelProviderClient(
         val texts = mutableListOf<String>()
         var refused = false
         body.path("output").forEach { output ->
-            if (output.path("type").stringValue() == "message") {
+            if (output.textValue("type") == "message") {
                 output.path("content").forEach { content ->
-                    when (content.path("type").stringValue()) {
+                    when (content.textValue("type")) {
                         "output_text" -> content.get("text")?.takeIf(JsonNode::isString)?.let {
                             texts += it.stringValue()
                         }
@@ -116,6 +116,9 @@ internal class OpenAiModelProviderClient(
             else -> ModelProviderResult.Generated(texts.single())
         }
     }
+
+    private fun JsonNode.textValue(fieldName: String): String? =
+        get(fieldName)?.takeIf(JsonNode::isString)?.stringValue()
 
     private companion object {
         val RESPONSES_URI: URI = URI.create("https://api.openai.com/v1/responses")

@@ -201,6 +201,12 @@ class BioPrivacyBoundaryTest {
         )
     }
 
+    @Test
+    fun `production alias catalogs exactly match the reviewed mappings`() {
+        assertEquals(JOB_ALIASES.toMap(), ReviewedBioAliases.jobs)
+        assertEquals(INTEREST_ALIASES.toMap(), ReviewedBioAliases.interests)
+    }
+
     @TestFactory
     fun `every reviewed job alias maps exactly with no prefix substring or fuzzy match`(): List<DynamicTest> =
         JOB_ALIASES.map { (alias, expected) ->
@@ -310,7 +316,7 @@ class BioPrivacyBoundaryTest {
     }
 
     @Test
-    fun `final validation failure is 502-class and leaves no writes`() {
+    fun `generated prose beyond the literal budget is 502-class and leaves no writes`() {
         val repository = RecordingRepository()
         val profile =
             PersonProfile.create(
@@ -323,7 +329,9 @@ class BioPrivacyBoundaryTest {
                 repository,
                 BioGenerator {
                     GeneratedBioTemplate.validate(
-                        "{{NAME}} is a delightfully quirky {{JOB}} with a knack for {{HOBBY}}.",
+                        "{{NAME}}{{JOB}}{{HOBBY}}" +
+                            "x".repeat(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS) +
+                            ".",
                     )
                 },
             ).execute(createCommand(profile))

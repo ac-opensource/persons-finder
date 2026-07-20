@@ -12,7 +12,7 @@ manipulation patterns and explicit credential or identifier patterns in job
 titles and hobbies. The policy scans an NFKC-normalized security copy with
 default-ignorable format characters and variation selectors removed, while
 stored profile text remains NFC-canonical.
-Names are not scanned by that heuristic because names never participate in bio
+Names are not scanned by that heuristic because names never enter remote bio
 generation. Profile validation rejects controls, separators, and Unicode format
 controls used for bidi or invisible-text deception; ZWJ and ZWNJ remain allowed
 for legitimate scripts and emoji.
@@ -36,20 +36,19 @@ and hobby values map to the broad `other` code.
 The remote adapter serializes that allowlist as data and instructs the model to
 treat every field as inert. OpenAI, Gemini, and Anthropic use provider-native
 structured JSON output constraints for an object containing only
-`template_id`, whose value is one of three application-owned IDs. This is
-defence in depth, not trust in the provider: the application caps the output
-size, enables duplicate-key detection, rejects malformed JSON, trailing
-content, extra fields, non-string values, and unknown IDs, and never accepts
-provider-authored prose.
+`bio_template`, whose value is model-authored prose. This is defence in depth,
+not trust in the provider: the application caps the output size, enables
+duplicate-key detection, and rejects malformed JSON, trailing content, extra
+fields, non-string values, or prose that fails the deterministic contract.
 
-Local code resolves the selected ID to a reviewed application-owned template.
-The application boundary independently normalizes and validates that template:
-it must be one safe sentence with exactly one literal `{{NAME}}`, `{{JOB}}`,
-and `{{HOBBY}}`, no unknown token, and no forbidden region disclosure. A
-trusted parser then renders the validated name, raw job title, and selected
-original hobby once as opaque segments without rescanning inserted text.
-Grounding and final validation run after composition, including the
-240-Unicode-code-point limit.
+The application boundary independently normalizes and validates the
+provider-authored template. It must contain one to three safe sentences,
+exactly one literal `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, no unknown token,
+no forbidden region disclosure, printable ASCII only, and no more than 100
+non-placeholder code points. A trusted parser then renders the validated name,
+raw job title, and selected original hobby once as opaque segments without
+rescanning inserted text. Grounding and final validation run after composition,
+including the 320-Unicode-code-point limit.
 
 Bio policy, provider, parsing, validation, or composition failure occurs before
 the person/location transaction starts, so it leaves no partial state. Provider
@@ -93,6 +92,14 @@ not make a third-party provider risk-free. Broad categories can still reveal
 limited traits, and network/provider metadata still exists. Provider contracts,
 retention controls, residency, subprocessors, access controls, and incident
 response require separate organizational review before production use.
+
+For the single, explicitly invoked live evaluation, the human owner separately
+accepts provider retention, abuse monitoring, human review, and
+product-improvement use, as applicable, of only the fixed synthetic smoke
+fixtures, versioned aggregate corpus, and fixed application-owned prompt/schema. The
+`*_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED` test gate records that narrow
+acceptance; it does not claim logging is disabled, authorize customer-derived
+or production data, or satisfy the production controls below.
 
 ## Higher-security banking architecture
 

@@ -7,6 +7,8 @@ import com.persons.finder.person.location.update.RetryIdentity
 import com.persons.finder.person.location.update.UpdateLocationCommand
 import com.persons.finder.person.location.update.UpdateLocationOutcome
 import com.persons.finder.person.location.update.UpdatePersonLocationService
+import com.persons.finder.person.model.CapturedAt
+import com.persons.finder.person.model.ClientUpdateId
 import com.persons.finder.person.model.GeoPoint
 import com.persons.finder.person.model.PersonId
 import com.persons.finder.person.model.PersonProfile
@@ -34,7 +36,9 @@ import org.testcontainers.postgresql.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
 import java.nio.file.Files
 import java.nio.file.Path
+import java.sql.Timestamp
 import java.time.Instant
+import java.time.temporal.ChronoUnit
 import java.util.UUID
 import kotlin.math.abs
 
@@ -114,6 +118,52 @@ class JdbcNearbyPersonRepositoryTest {
             .andExpect(jsonPath("$[0].bio").isNotEmpty)
             .andExpect(jsonPath("$[0].latitude").doesNotExist())
             .andExpect(jsonPath("$[0].longitude").doesNotExist())
+    }
+
+    @Test
+    fun `HTTP nearby follows move out and reentry without expiring a stale current location`() {
+        val origin = GeoPoint.from(-41.2865, 174.7762)
+        val mover = create("Mover", origin)
+        val staleCurrentPerson = fixtureId(41)
+        insertAt(
+            personId = staleCurrentPerson,
+            latitude = origin.latitude,
+            longitude = origin.longitude,
+            recordedAt = Instant.parse("2000-01-01T00:00:00Z"),
+        )
+        val base = Instant.now().plusSeconds(1).truncatedTo(ChronoUnit.MILLIS)
+
+        assertEquals(setOf(mover.value, staleCurrentPerson), nearbyIds(origin))
+
+        val movedOut =
+            updateLocation.execute(
+                UpdateLocationCommand(
+                    personId = mover,
+                    point = GeoPoint.from(-36.8485, 174.7633),
+                    retryIdentity =
+                        RetryIdentity.ClientKey(
+                            capturedAt = CapturedAt.fromStored(base),
+                            clientUpdateId = ClientUpdateId.from(UUID.randomUUID()),
+                        ),
+                ),
+            )
+        assertTrue(movedOut is UpdateLocationOutcome.Accepted)
+        assertEquals(setOf(staleCurrentPerson), nearbyIds(origin))
+
+        val movedBack =
+            updateLocation.execute(
+                UpdateLocationCommand(
+                    personId = mover,
+                    point = origin,
+                    retryIdentity =
+                        RetryIdentity.ClientKey(
+                            capturedAt = CapturedAt.fromStored(base.plusSeconds(1)),
+                            clientUpdateId = ClientUpdateId.from(UUID.randomUUID()),
+                        ),
+                ),
+            )
+        assertTrue(movedBack is UpdateLocationOutcome.Accepted)
+        assertEquals(setOf(mover.value, staleCurrentPerson), nearbyIds(origin))
     }
 
     @Test
@@ -343,21 +393,24 @@ class JdbcNearbyPersonRepositoryTest {
         personId: UUID,
         latitude: Double,
         longitude: Double,
+        recordedAt: Instant = FIXTURE_RECORDED_AT,
     ) {
-        insertPerson(personId)
+        insertPerson(personId, recordedAt)
         jdbc.update(
             """
             INSERT INTO location_observation (
                 id, person_id, captured_at, received_at, source, client_update_id, location
             )
             VALUES (
-                ?, ?, '2026-07-20T00:00:00Z', '2026-07-20T00:00:00Z',
+                ?, ?, ?, ?,
                 'INITIAL', NULL,
                 ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography
             )
             """.trimIndent(),
             observationId(personId),
             personId,
+            Timestamp.from(recordedAt),
+            Timestamp.from(recordedAt),
             longitude,
             latitude,
         )
@@ -397,15 +450,18 @@ class JdbcNearbyPersonRepositoryTest {
         insertProjection(personId)
     }
 
-    private fun insertPerson(personId: UUID) {
+    private fun insertPerson(
+        personId: UUID,
+        createdAt: Instant = FIXTURE_RECORDED_AT,
+    ) {
         jdbc.update(
             """
             INSERT INTO person (id, name, job_title, hobbies, bio, created_at)
-            VALUES (?, ?, 'Software engineer', ARRAY['hiking'], 'A quirky local profile.',
-                    '2026-07-20T00:00:00Z')
+            VALUES (?, ?, 'Software engineer', ARRAY['hiking'], 'A quirky local profile.', ?)
             """.trimIndent(),
             personId,
             "Person ${personId.toString().takeLast(4)}",
+            Timestamp.from(createdAt),
         )
     }
 
@@ -490,6 +546,24 @@ class JdbcNearbyPersonRepositoryTest {
             ) as CreatePersonOutcome.Created
         ).person.id
 
+    private fun nearbyIds(origin: GeoPoint): Set<UUID> {
+        val response =
+            mockMvc.perform(
+                get("/persons/nearby")
+                    .queryParam("lat", origin.latitude.toString())
+                    .queryParam("lon", origin.longitude.toString())
+                    .queryParam("radius", "1"),
+            )
+                .andExpect(status().isOk)
+                .andReturn()
+                .response
+                .contentAsString
+        return com.jayway.jsonpath.JsonPath
+            .read<List<String>>(response, "$[*].id")
+            .map(UUID::fromString)
+            .toSet()
+    }
+
     private fun clearRows() {
         jdbc.execute(
             "TRUNCATE TABLE last_known_location_projection, location_observation, person CASCADE",
@@ -560,5 +634,8 @@ class JdbcNearbyPersonRepositoryTest {
 
         private fun observationId(personId: UUID): UUID =
             UUID.fromString(personId.toString().replaceFirst("00000000", "10000000"))
+
+        private val FIXTURE_RECORDED_AT: Instant =
+            Instant.parse("2026-07-20T00:00:00Z")
     }
 }

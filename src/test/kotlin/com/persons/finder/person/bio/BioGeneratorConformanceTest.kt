@@ -53,10 +53,9 @@ class BioGeneratorConformanceTest {
         }
 
     @Test
-    fun `remote failure categories remain normalized with no fallback invocation`() {
+    fun `remote failure categories remain normalized with one provider invocation`() {
         BioGenerationFailure.entries.forEach { failure ->
             var providerCalls = 0
-            var fallbackCalls = 0
             val remote =
                 RemoteBioGenerator(
                     ModelProviderClient {
@@ -69,7 +68,6 @@ class BioGeneratorConformanceTest {
 
             assertEquals(BioGenerationResult.Failure(failure), result)
             assertEquals(1, providerCalls)
-            assertEquals(0, fallbackCalls)
         }
     }
 
@@ -106,7 +104,7 @@ class BioGeneratorConformanceTest {
                 RemoteBioGenerator(
                     ModelProviderClient {
                         ModelProviderResult.Generated(
-                            """{"template_id":"quirky_side_quest"}""",
+                            """{"bio_template":"{{NAME}} turns {{HOBBY}} into a quirky side quest after a day as a {{JOB}}."}""",
                         )
                     },
                     JsonMapper.builder().build(),
