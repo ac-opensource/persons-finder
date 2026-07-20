@@ -182,3 +182,90 @@ docker compose down
 Use `docker compose down --volumes` only when deletion of the local database
 volume is intended. See [`SECURITY.md`](SECURITY.md) for the implemented
 security boundary and known production gaps.
+
+## Local web dashboard
+
+The Spring application serves a same-origin dashboard at
+<http://127.0.0.1:8080/> when the loopback-only default stack is running. Click
+the map to create a person, drag a person created or previously moved by this
+tab to update their last-known location, or set a nearby-search centre and
+radius. The dashboard composes only the three core routes:
+`POST /persons`, `PUT /persons/{id}/location`, and `GET /persons/nearby`.
+
+Every nearby item includes the canonical last-known point as nested
+`location.latitude` and `location.longitude`, so the dashboard can plot
+existing and seeded people returned by the search. Selecting either a map point
+or a nearby result opens the person's details in a floating window, independent
+of the result-list length. `POST /persons` and
+`PUT /persons/{id}/location` response shapes remain unchanged and do not return
+coordinates. The browser keeps a tab-local mapping in `sessionStorage` only to
+remember which people this tab may move; markers learned only from a nearby
+response are visible but not draggable. Closing the tab ends that page session.
+**Forget tab map data** clears only that browser mapping—it does not delete
+people or location observations from the backend, and a later nearby search can
+display their last-known locations again.
+
+### Dashboard demos
+
+#### Interactive workflow
+
+![Creating, dragging, searching, and inspecting people in the local dashboard](docs/assets/dashboard-demo-non-seeded.gif)
+
+#### Seeded benchmark
+
+![Exploring dense seeded nearby results at different radii](docs/assets/dashboard-demo-seeded.gif)
+
+### Run the seeded dashboard
+
+The isolated benchmark requires Docker Engine with Compose v2, Python 3.9 or
+newer, `curl`, `openssl`, and enough local disk for 1,000,000 people and
+5,000,000 location observations. From the repository root, build the benchmark
+stack, create its ignored local database secret, seed the deterministic data,
+and run the correctness gates:
+
+```bash
+./benchmarks/bin/benchmark seed
+```
+
+The command leaves the isolated stack running. When it completes, open
+<http://127.0.0.1:18081/> to use the dashboard against the seeded database.
+The separate default development stack and database are not used. Creating or
+moving a person changes this benchmark seed; run the guarded `reset` and
+`seed` sequence again before a measured `benchmark run`, and do not interact
+with the dashboard while that measurement is active.
+
+To stop the benchmark containers while preserving the seeded volume:
+
+```bash
+docker compose \
+  --file benchmarks/compose.yaml \
+  --project-name persons-finder-benchmark \
+  --profile benchmark \
+  down
+```
+
+Restart that preserved seed later with:
+
+```bash
+docker compose \
+  --file benchmarks/compose.yaml \
+  --project-name persons-finder-benchmark \
+  --profile benchmark \
+  up --detach --wait
+```
+
+Run `./benchmarks/bin/benchmark reset` only when you intend to delete the
+guarded benchmark volume and create a fresh seed; raw result files are
+preserved. The full benchmark workflow and the boundary of the currently
+available results are documented in
+[`benchmarks/README.md`](benchmarks/README.md) and
+[`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
+
+The assessment-default API is unauthenticated and bound to loopback. Its nearby
+response discloses exact last-known locations, so do not publish this dashboard
+or API beyond a trusted local environment without authentication, per-person
+authorization, abuse controls, and an approved location-disclosure policy.
+
+The basemap uses OpenStreetMap's public tile service, so viewing the map makes
+network requests to that service. See `SECURITY.md` for the data boundary and
+deployment caveats.

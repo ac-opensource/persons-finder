@@ -124,16 +124,23 @@ revision.
 
 ## Local dashboard privacy and map egress
 
-The public API deliberately omits stored coordinates from person, location-
-update, and nearby-search responses. The local dashboard can plot only
-coordinates authored by the current browser tab when it creates or moves a
-person. It retains that mapping in `sessionStorage`, which is scoped to the
-tab's page session and is cleared when the tab is closed or when the user
-chooses **Forget tab map data**. That action does not erase backend people or
-location observations. Profile details and coordinates remain sensitive even
-within this short-lived browser state. Nearby search necessarily sends centre
-coordinates in the same-origin API query URL; they must not be copied into
-logs, analytics, third-party URLs, or map-tile requests.
+`GET /persons/nearby` returns each matching person's exact canonical last-known
+point as nested `location.latitude` and `location.longitude`. This is distinct
+from the bio-generation egress boundary: no coordinates are sent to a model.
+`POST /persons` and `PUT /persons/{id}/location` responses remain unchanged and
+omit coordinates.
+
+The dashboard plots locations returned by nearby search. It also retains a
+tab-local mapping in `sessionStorage` to remember which people were created or
+moved by that tab and may therefore be dragged again. Markers learned only from
+a nearby response are visible but not draggable. Closing the tab or choosing
+**Forget tab map data** clears that browser mapping; it does not erase backend
+people or location observations, and it is not a privacy barrier because a
+later nearby search can return the last-known locations again. Profile details
+and precise locations remain sensitive. Nearby search sends centre coordinates
+in the same-origin API query URL and returns matching coordinates in its
+response; neither should be copied into logs, analytics, third-party URLs, or
+map-tile requests.
 
 The default basemap loads OpenStreetMap tiles from an external best-effort
 service. Those requests disclose the tile zoom/column/row (`z/x/y`) and the
@@ -145,12 +152,14 @@ usage policy rather than treating the public tile service as an availability
 dependency.
 
 The evaluator-default backend is unauthenticated and exposed only on loopback.
-It has no application-level authentication or rate limiting. Repeated,
-carefully chosen nearby queries could be combined to infer a person's location
-despite the response schema withholding coordinates. Do not expose this
-dashboard or API beyond the trusted local environment until authenticated
-authorization, abuse controls, and an approved location-disclosure policy are
-implemented.
+It has no application-level authentication, per-person authorization, or rate
+limiting. Any caller who can reach it can retrieve exact last-known locations
+for people matching a query, and systematic queries can sweep a wider area.
+Do not expose this dashboard or API beyond the trusted local environment. A
+broader deployment requires authenticated callers, per-person or relationship-
+based authorization, purpose-scoped disclosure, TLS, abuse controls,
+privacy-reviewed audit metadata, and an approved location-disclosure policy;
+it may also require a separately versioned response contract.
 
 ## Third-party PII and model risk
 
@@ -217,6 +226,13 @@ place it behind a dedicated egress service that:
 - enforces approved retention, residency, subprocessor, and deletion terms; and
 - undergoes threat modelling, privacy impact assessment, red-team testing,
   output monitoring, and incident-response exercises.
+
+Expose location through a separate authenticated resource boundary. Authorize
+each caller against the subject and purpose before returning even a last-known
+point, minimize precision and retention where the use case permits, prevent
+area-sweeping queries, and audit access without recording the coordinates
+themselves. The loopback assessment's unauthenticated exact-location response
+must not be deployed unchanged in that environment.
 
 Customer consent, purpose limitation, authorization, retention/deletion policy,
 and legal approval remain human-owned controls. A model response must never
