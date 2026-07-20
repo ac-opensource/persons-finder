@@ -1,6 +1,7 @@
-package com.persons.finder.person.create
+package com.persons.finder.person.bio
 
 import com.persons.finder.person.model.PersonProfile
+import java.text.Normalizer
 import java.util.Locale
 
 class BioPolicy {
@@ -18,7 +19,9 @@ class BioPolicy {
                 ?: mappedHobbies.first().original
         requireCompositionFits(profile, selectedHobby)
 
-        if (isUnsafeBioSource(profile.jobTitle) || profile.hobbies.any(::isUnsafeBioSource)) {
+        if (
+            sourceValuesForInspection(profile).any(::violatesBioContentPolicy)
+        ) {
             throw UnsafeBioInputException()
         }
 
@@ -34,67 +37,10 @@ class BioPolicy {
     }
 
     fun compose(
-        template: String,
+        template: GeneratedBioTemplate,
         profile: PersonProfile,
         selectedHobby: String,
-    ): String {
-        validateTemplate(template)
-
-        val values =
-            mapOf(
-                "NAME" to profile.name,
-                "JOB" to profile.jobTitle,
-                "HOBBY" to selectedHobby,
-            )
-        val rendered = StringBuilder()
-        var cursor = 0
-        APPROVED_TOKEN.findAll(template).forEach { match ->
-            rendered.append(template, cursor, match.range.first)
-            rendered.append(values.getValue(match.groupValues[1]))
-            cursor = match.range.last + 1
-        }
-        rendered.append(template, cursor, template.length)
-
-        val bio = rendered.toString()
-        require(isOneSafeSentence(bio)) { "Composed bio must be one safe sentence" }
-        require(bio.codePointCount(0, bio.length) <= FINAL_BIO_MAX_CODE_POINTS) {
-            "Composed bio exceeds its final limit"
-        }
-        return bio
-    }
-
-    private fun validateTemplate(template: String) {
-        require(template.isNotBlank()) { "Generated template must not be blank" }
-        require(template.isWellFormedUtf16()) { "Generated template contains malformed Unicode" }
-        require(template.codePoints().noneMatch(::isForbiddenOutputCodePoint)) {
-            "Generated template contains forbidden controls"
-        }
-        require(!isUnsafeBioSource(template)) {
-            "Generated template failed the safe-output policy"
-        }
-        REQUIRED_TOKENS.forEach { token ->
-            require(token.toRegex(RegexOption.LITERAL).findAll(template).count() == 1) {
-                "Generated template has invalid placeholder cardinality"
-            }
-        }
-
-        val withoutApprovedTokens = REQUIRED_TOKENS.fold(template) { value, token ->
-            value.replace(token, "")
-        }
-        require(!withoutApprovedTokens.contains("{{") && !withoutApprovedTokens.contains("}}")) {
-            "Generated template contains an unknown placeholder"
-        }
-        require(DISALLOWED_REGION_TERMS.none { template.contains(it, ignoreCase = true) }) {
-            "Generated template discloses a disallowed region"
-        }
-    }
-
-    private fun isOneSafeSentence(value: String): Boolean {
-        if (value.isBlank() || value.codePoints().anyMatch(::isForbiddenOutputCodePoint)) {
-            return false
-        }
-        return !hasUnrecognizedInternalSentenceBoundary(value)
-    }
+    ): GeneratedBio = GeneratedBio.compose(template, profile, selectedHobby)
 
     private fun requireCompositionFits(
         profile: PersonProfile,
@@ -194,9 +140,102 @@ private val INTEREST_ALIASES =
 
 private val UNSAFE_SOURCE_PATTERNS =
     listOf(
-        Regex("""(?i)\b(?:ignore|disregard|override)\b.{0,40}\b(?:instruction|prompt|system|developer)\b"""),
-        Regex("""(?i)\b(?:system|developer|assistant)\s*(?:message|prompt|instruction)?\s*:"""),
-        Regex("""(?i)\b(?:reveal|print|repeat)\b.{0,40}\b(?:system prompt|secret|instruction)\b"""),
+        Regex(
+            """\b(?:ignore|disregard|override|forget|bypass)\b.{0,100}""" +
+                """\b(?:instructions?|prompts?|directives?|system|developer|assistant|safeguards?)\b""" +
+                """.{0,100}\b(?:say|return|respond|output|write|print|repeat|reveal|do)\b""",
+        ),
+        Regex(
+            """\b(?:system|developer|assistant)\b.{0,60}""" +
+                """\b(?:ignore|reveal|say|return|respond|output|write|print|repeat|override|bypass)\b""",
+        ),
+        Regex(
+            """\b(?:reveal|print|repeat|output|return|respond|say|write)\b.{0,100}""" +
+                """\b(?:system prompts?|secrets?|instructions?|credentials?|i am hacked)\b""",
+        ),
+        Regex("""\bi\s+am\s+hacked\b"""),
+    )
+
+private fun String.aliasKey(): String = lowercase(Locale.ROOT)
+
+internal fun violatesBioContentPolicy(value: String): Boolean {
+    val normalized = value.securityScanValue() ?: return true
+    return UNSAFE_SOURCE_PATTERNS.any { it.containsMatchIn(normalized.words) } ||
+        FORBIDDEN_SOURCE_LITERAL_PATTERNS.any { it.containsMatchIn(normalized.literal) }
+}
+
+private fun sourceValuesForInspection(profile: PersonProfile): List<String> {
+    val individual = listOf(profile.jobTitle) + profile.hobbies
+    val adjacent =
+        individual
+            .zipWithNext()
+            .flatMap { (first, second) ->
+                listOf("$first $second", first + second)
+            }
+    val complete = listOf(individual.joinToString(" "), individual.joinToString(""))
+    return individual + adjacent + complete
+}
+
+private data class SecurityScanValue(
+    val literal: String,
+    val words: String,
+)
+
+private fun String.securityScanValue(): SecurityScanValue? {
+    val decoded = decodeUnicodeEscapesForInspection() ?: return null
+    val normalized =
+        Normalizer
+            .normalize(decoded, Normalizer.Form.NFKC)
+            .codePoints()
+            .toArray()
+            .asSequence()
+            .filterNot(::isDefaultIgnorableForInspection)
+            .map(::inspectionCodePoint)
+            .joinToString(separator = "") { codePoint -> String(Character.toChars(codePoint)) }
+            .lowercase(Locale.ROOT)
+    return SecurityScanValue(
+        literal = normalized,
+        words =
+            normalized
+                .replace(Regex("""[^\p{L}\p{N}]+"""), " ")
+                .trim()
+                .replace(Regex("""\s+"""), " "),
+    )
+}
+
+private fun String.decodeUnicodeEscapesForInspection(): String? {
+    var invalidEscape = false
+    val decoded =
+        UNICODE_ESCAPE.replace(this) { match ->
+            val codePoint =
+                match.groupValues[1]
+                    .ifEmpty { match.groupValues[2] }
+                    .toInt(16)
+            if (Character.isValidCodePoint(codePoint)) {
+                String(Character.toChars(codePoint))
+            } else {
+                invalidEscape = true
+                ""
+            }
+        }
+    return decoded.takeUnless { invalidEscape }
+}
+
+private fun inspectionCodePoint(codePoint: Int): Int =
+    CONFUSABLE_ASCII[codePoint] ?: codePoint
+
+private fun isDefaultIgnorableForInspection(codePoint: Int): Boolean {
+    if (Character.getType(codePoint) == Character.FORMAT.toInt()) {
+        return true
+    }
+    return codePoint in MONGOLIAN_VARIATION_SELECTORS ||
+        codePoint == MONGOLIAN_FREE_VARIATION_SELECTOR_FOUR ||
+        codePoint in STANDARD_VARIATION_SELECTORS ||
+        codePoint in SUPPLEMENTARY_VARIATION_SELECTORS
+}
+
+private val FORBIDDEN_SOURCE_LITERAL_PATTERNS =
+    listOf(
         Regex("""(?i)<\|(?:system|developer|assistant|user)\|>"""),
         Regex("""(?i)-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"""),
         Regex("""(?i)\bbearer\s+[a-z0-9._~+/=-]{12,}\b"""),
@@ -207,59 +246,57 @@ private val UNSAFE_SOURCE_PATTERNS =
         Regex("""(?<!\d)(?:\+?\d[\d .()-]{7,}\d)(?!\d)"""),
     )
 
-private val REQUIRED_TOKENS = listOf("{{NAME}}", "{{JOB}}", "{{HOBBY}}")
-private val APPROVED_TOKEN = Regex("""\{\{(NAME|JOB|HOBBY)}}""")
-private val DISALLOWED_REGION_TERMS = listOf("North Island", "South Island")
-private val SENTENCE_BOUNDARY_WITH_CONTINUATION =
-    Regex("""([.!?])(?:["')\]]*)\s*(?=\S)""")
-private val PRECEDING_WORD = Regex("""([\p{L}]+(?:\.[\p{L}]+)*)$""")
-private val NON_TERMINAL_PERIOD_WORDS =
-    setOf("dr", "e.g", "i.e", "jr", "mr", "mrs", "ms", "prof", "sr", "st", "vs")
+private val UNICODE_ESCAPE = Regex("""\\u(?:\{([0-9A-Fa-f]{1,6})}|([0-9A-Fa-f]{4}))""")
 
-private fun String.aliasKey(): String = lowercase(Locale.ROOT)
+private val MONGOLIAN_VARIATION_SELECTORS = 0x180B..0x180D
+private const val MONGOLIAN_FREE_VARIATION_SELECTOR_FOUR = 0x180F
+private val STANDARD_VARIATION_SELECTORS = 0xFE00..0xFE0F
+private val SUPPLEMENTARY_VARIATION_SELECTORS = 0xE0100..0xE01EF
 
-private fun isUnsafeBioSource(value: String): Boolean =
-    UNSAFE_SOURCE_PATTERNS.any { it.containsMatchIn(value) }
-
-private fun hasUnrecognizedInternalSentenceBoundary(value: String): Boolean =
-    SENTENCE_BOUNDARY_WITH_CONTINUATION.findAll(value).any { boundary ->
-        if (boundary.groupValues[1] != ".") {
-            true
-        } else {
-            val precedingWord =
-                PRECEDING_WORD
-                    .find(value.substring(0, boundary.range.first))
-                    ?.value
-                    ?.lowercase(Locale.ROOT)
-            precedingWord == null ||
-                (precedingWord.length > 1 && precedingWord !in NON_TERMINAL_PERIOD_WORDS)
-        }
-    }
-
-private fun isForbiddenOutputCodePoint(codePoint: Int): Boolean =
-    when (Character.getType(codePoint)) {
-        Character.CONTROL.toInt(),
-        Character.LINE_SEPARATOR.toInt(),
-        Character.PARAGRAPH_SEPARATOR.toInt(),
-        -> true
-
-        else -> false
-    }
-
-private fun String.isWellFormedUtf16(): Boolean {
-    var index = 0
-    while (index < length) {
-        when {
-            Character.isHighSurrogate(this[index]) -> {
-                if (index + 1 >= length || !Character.isLowSurrogate(this[index + 1])) {
-                    return false
-                }
-                index += 2
-            }
-
-            Character.isLowSurrogate(this[index]) -> return false
-            else -> index++
-        }
-    }
-    return true
-}
+private val CONFUSABLE_ASCII =
+    mapOf(
+        0x0391 to 'a'.code,
+        0x0392 to 'b'.code,
+        0x0395 to 'e'.code,
+        0x0397 to 'h'.code,
+        0x0399 to 'i'.code,
+        0x039A to 'k'.code,
+        0x039C to 'm'.code,
+        0x039D to 'n'.code,
+        0x039F to 'o'.code,
+        0x03A1 to 'p'.code,
+        0x03A4 to 't'.code,
+        0x03A7 to 'x'.code,
+        0x03B1 to 'a'.code,
+        0x03B5 to 'e'.code,
+        0x03B9 to 'i'.code,
+        0x03BA to 'k'.code,
+        0x03BF to 'o'.code,
+        0x03C1 to 'p'.code,
+        0x03C4 to 't'.code,
+        0x03C7 to 'x'.code,
+        0x0406 to 'i'.code,
+        0x0410 to 'a'.code,
+        0x0412 to 'b'.code,
+        0x0415 to 'e'.code,
+        0x041A to 'k'.code,
+        0x041C to 'm'.code,
+        0x041D to 'h'.code,
+        0x041E to 'o'.code,
+        0x0420 to 'p'.code,
+        0x0421 to 'c'.code,
+        0x0422 to 't'.code,
+        0x0425 to 'x'.code,
+        0x0430 to 'a'.code,
+        0x0435 to 'e'.code,
+        0x043A to 'k'.code,
+        0x043C to 'm'.code,
+        0x043D to 'h'.code,
+        0x043E to 'o'.code,
+        0x0440 to 'p'.code,
+        0x0441 to 'c'.code,
+        0x0442 to 't'.code,
+        0x0445 to 'x'.code,
+        0x0456 to 'i'.code,
+        0x0458 to 'j'.code,
+    )

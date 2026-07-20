@@ -86,12 +86,20 @@ class ApiExceptionHandler {
             "The client update identifier was reused with different content.",
         )
 
-    @ExceptionHandler(BioInputRejectedApiException::class)
-    fun bioInputRejected(): ResponseEntity<ApiProblem> =
+    @ExceptionHandler(UnsafeBioInputApiException::class)
+    fun unsafeBioInput(): ResponseEntity<ApiProblem> =
         problem(
-            ProblemCode.BIO_INPUT_REJECTED,
-            "Bio input rejected",
+            ProblemCode.UNSAFE_BIO_INPUT,
+            "Unsafe bio input",
             "The bio source input was rejected by policy.",
+        )
+
+    @ExceptionHandler(BioGenerationInvalidApiException::class)
+    fun bioInvalid(): ResponseEntity<ApiProblem> =
+        problem(
+            ProblemCode.BIO_GENERATION_INVALID,
+            "Bio generation invalid",
+            "The generator did not produce a valid safe bio.",
         )
 
     @ExceptionHandler(BioGenerationUnavailableApiException::class)
@@ -116,7 +124,9 @@ class PersonNotFoundApiException : RuntimeException()
 
 class IdempotencyKeyReusedApiException : RuntimeException()
 
-class BioInputRejectedApiException : RuntimeException()
+class UnsafeBioInputApiException : RuntimeException()
+
+class BioGenerationInvalidApiException : RuntimeException()
 
 class BioGenerationUnavailableApiException : RuntimeException()
 

@@ -38,7 +38,7 @@ The closed request object contains:
 
 ```json
 {
-  "name": "Aroha",
+  "name": "Andrew",
   "jobTitle": "Software engineer",
   "hobbies": ["tramping", "pottery"],
   "location": {
@@ -58,8 +58,10 @@ server-clock value supplies person `createdAt` and that observation's
 Profile text is canonicalized before use: validate well-formed Unicode, trim
 outer Unicode whitespace, normalize to NFC, preserve case, internal whitespace,
 list order, and original spelling, and reject blank text, control characters,
-line/paragraph separators, and malformed Unicode. Limits count Unicode code
-points:
+line/paragraph separators, malformed Unicode, and Unicode format controls other
+than ZWJ/ZWNJ. The joiners remain valid for legitimate scripts and emoji but
+are removed from the separate NFKC-normalized bio-policy scan so they cannot
+split an attack term. Limits count Unicode code points:
 
 - `name`: 1 to 80
 - `jobTitle`: 1 to 80
@@ -70,9 +72,9 @@ points:
 Exact canonical hobby duplicates are removed after the raw 10-item cap,
 preserving first-input order. Case-folding and fuzzy matching are not used for
 stored source values. The selected-value aggregate reserves 34 code points for
-the shortest approved grammatical assessment template
-`, a quirky , has a soft spot for .`; it is checked before generation so the
-three opaque inserted values can fit the 240-code-point final contract.
+the minimum approved grammatical-template overhead. The resulting 206-code-
+point bound proves that at least one compliant local composition can fit before
+generation is attempted.
 
 ### Location updates
 
@@ -155,7 +157,8 @@ values. `instance` is omitted.
 | 400 | `VALIDATION_FAILED` | `urn:persons-finder:problem:validation-failed` |
 | 404 | `PERSON_NOT_FOUND` | `urn:persons-finder:problem:person-not-found` |
 | 409 | `IDEMPOTENCY_KEY_REUSED` | `urn:persons-finder:problem:idempotency-key-reused` |
-| 422 | `BIO_INPUT_REJECTED` | `urn:persons-finder:problem:bio-input-rejected` |
+| 422 | `UNSAFE_BIO_INPUT` | `urn:persons-finder:problem:unsafe-bio-input` |
+| 502 | `BIO_GENERATION_INVALID` | `urn:persons-finder:problem:bio-generation-invalid` |
 | 503 | `BIO_GENERATION_UNAVAILABLE` | `urn:persons-finder:problem:bio-generation-unavailable` |
 
 Only `VALIDATION_FAILED` includes `violations`. Each violation has `field` and
@@ -169,9 +172,11 @@ for an otherwise valid `jobTitle` or hobby matching a narrow deterministic,
 high-confidence policy: instruction override/reveal/impersonation or explicit
 role/control-token injection; or a credential, private key, bearer/API token,
 JWT, email address, phone number, or URL. Placeholder-looking source text by
-itself remains valid because local composition treats it as opaque. `name` is
-not scanned. Fuzzy suspicion, toxicity, identity, and sensitive or rare hobby
-topics are not rejection criteria.
+itself remains valid because source text cannot enter the model request and is
+inserted locally as opaque data without rescanning. Policy matching uses a
+separate NFKC security view with ZWJ/ZWNJ removed; stored text remains NFC.
+`name` is not scanned. Fuzzy suspicion, toxicity, identity, and sensitive or
+rare hobby topics are not rejection criteria.
 
 ### Domain and application boundaries
 
@@ -192,8 +197,8 @@ Bio generation uses an application-owned, provider/model-neutral
 only literal `{{NAME}}`, constants `en-NZ` and `NZ`, required `job-v1` broad job
 code, nonempty deduplicated `interest-v1` broad interest codes, optional closed
 macro-region, and `quirky` tone. It has no property capable of carrying a real
-name, source job/hobby text, location, identifier, token, or arbitrary
-customer context.
+name, source job/hobby text, location, identifier, token, or arbitrary customer
+context.
 
 `SafeJobCode` v1 is exactly `technology_engineering`, `healthcare`,
 `education_research`, `creative_media`, `business_operations`,
@@ -207,9 +212,10 @@ Reviewed aliases match the entire locally normalized source value only; there
 is no fuzzy, substring, or cross-field inference. Unmapped benign values map to
 `other`. Sensitive or rare topics get no specific alias and remain accepted
 local source values. Hobbies map in order, outbound codes deduplicate by first
-appearance, and the grounding hobby is the first reviewed exact alias or,
-when none exists, the first benign unmatched hobby. The both-`other` path is an
-intentional generic assessment degradation.
+appearance, and final grounding selects the first exactly mapped original hobby
+or, if none maps, the first benign unmatched hobby. The both-`other` provider
+path is an intentional generic assessment degradation; exact job and selected
+hobby grounding occurs only inside the trusted local boundary.
 
 Actual instruction manipulation and explicit secrets/identifiers in otherwise
 valid job/hobby input are rejected. The typed request is the hard egress
@@ -217,18 +223,22 @@ guarantee; content detection is additional defence only. `macroRegion` is
 always omitted in this slice. Locale/country are deployment output context and
 never assert customer location, nationality, or identity.
 
-Generator output must contain exactly one each of `{{NAME}}`, `{{JOB}}`, and
-`{{HOBBY}}`, no unknown placeholder, controls, or disallowed island wording.
-A trusted local parser renders each token once with the validated original
-value as opaque text and never rescans inserted text. The final result must be
-one nonblank sentence of at most 240 Unicode code points.
+Remote provider output is only one exact `BioTemplateId` from a closed
+application-owned enum. The remote adapter caps and strictly parses the JSON,
+rejecting duplicate or extra fields, trailing content, non-string values, and
+unknown IDs, then resolves the ID to an application-owned
+`GeneratedBioTemplate`. The application boundary independently requires
+exactly one each of `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, no unknown token,
+one safe sentence, and no forbidden region disclosure. A trusted parser renders
+validated source values once as opaque segments, verifies exact grounding, and
+revalidates the final sentence and 240-code-point limit before persistence.
 
-Any future network adapter must preserve this allowlist, log metadata only,
-normalize failures, and never silently fall back. Unknown adapter
+The opt-in network adapter preserves this allowlist, logs metadata only,
+normalizes failures, and never silently falls back. Unknown adapter
 configuration fails startup/readiness. The deterministic credential-free
-adapter is selected only for tests and the assessment-local runtime. Bio
-generation and validation complete before the transaction that writes the
-person, initial observation, and projection.
+adapter remains the test and assessment-local default. Bio generation and
+validation complete before the transaction that writes the person, initial
+observation, and projection.
 
 ## Consequences
 
@@ -246,8 +256,8 @@ person, initial observation, and projection.
 ## Out of scope
 
 The public nearby HTTP endpoint, its GiST index/migration, complete spatial-edge
-evidence, external bio adapters, authentication, mobile code, and deferred
-product features are outside this slice. The nearby query port and JDBC/PostGIS
+evidence, authentication, mobile code, and deferred product features are
+outside this slice. The nearby query port and JDBC/PostGIS
 adapter are structured separately so that follow-on work cannot grow the shared
 command repository. Retention, erasure, purge repair, post-purge replay,
 restore, receipt/HMAC design, and key rotation remain lifecycle questions

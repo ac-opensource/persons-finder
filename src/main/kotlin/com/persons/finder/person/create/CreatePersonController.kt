@@ -4,10 +4,11 @@ import com.persons.finder.person.model.PersonProfile
 import com.persons.finder.person.model.ProfileValidationException
 import com.persons.finder.person.model.ProfileValidationField
 import com.persons.finder.person.model.ProfileValidationReason
+import com.persons.finder.web.BioGenerationInvalidApiException
 import com.persons.finder.web.BioGenerationUnavailableApiException
-import com.persons.finder.web.BioInputRejectedApiException
 import com.persons.finder.web.ProblemViolation
 import com.persons.finder.web.RequestValidationException
+import com.persons.finder.web.UnsafeBioInputApiException
 import com.persons.finder.web.ViolationCode
 import com.persons.finder.web.asApiTimestamp
 import com.persons.finder.web.rejectQueryParameters
@@ -48,8 +49,9 @@ class CreatePersonController(
                     listOf(ProblemViolation("hobbies", ViolationCode.TOO_LONG)),
                 )
 
-            CreatePersonOutcome.BioInputRejected -> throw BioInputRejectedApiException()
-            CreatePersonOutcome.BioGenerationUnavailable ->
+            CreatePersonOutcome.UnsafeBioInput -> throw UnsafeBioInputApiException()
+            is CreatePersonOutcome.BioGenerationInvalid -> throw BioGenerationInvalidApiException()
+            is CreatePersonOutcome.BioGenerationUnavailable ->
                 throw BioGenerationUnavailableApiException()
         }
     }
@@ -115,7 +117,7 @@ private fun CreatePersonResult.toResponse(): CreatePersonResponse =
         name = profile.name,
         jobTitle = profile.jobTitle,
         hobbies = profile.hobbies,
-        bio = bio,
+        bio = bio.value,
         createdAt = createdAt.asApiTimestamp(),
         lastKnownLocationAt = lastKnownLocationAt.asApiTimestamp(),
     )
