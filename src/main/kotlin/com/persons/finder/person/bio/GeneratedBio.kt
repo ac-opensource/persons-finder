@@ -69,7 +69,8 @@ value class GeneratedBioTemplate private constructor(val value: String) {
 /**
  * Final write-boundary type. Construction parses template tokens, appends
  * source values as opaque segments once, and independently checks grounding
- * and the final public contract.
+ * and the final public contract. Sentence structure is established by the
+ * validated template; punctuation in opaque source segments is not reparsed.
  */
 @JvmInline
 value class GeneratedBio private constructor(val value: String) {
@@ -121,7 +122,6 @@ value class GeneratedBio private constructor(val value: String) {
             require(bio.codePoints().noneMatch(::isForbiddenFinalCodePoint)) {
                 "Composed bio contains forbidden controls"
             }
-            require(bio.isOneSafeSentence()) { "Composed bio must be one safe sentence" }
             require(bio.codePointCount(0, bio.length) <= BioPolicy.FINAL_BIO_MAX_CODE_POINTS) {
                 "Composed bio exceeds its final limit"
             }

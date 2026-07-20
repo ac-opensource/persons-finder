@@ -17,7 +17,9 @@ import com.persons.finder.web.ApiExceptionHandler
 import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.TestFactory
 import org.junit.jupiter.api.extension.ExtendWith
 import org.springframework.boot.test.system.CapturedOutput
 import org.springframework.boot.test.system.OutputCaptureExtension
@@ -120,9 +122,65 @@ class CreatePersonSecurityHttpTest {
         assertEquals(PersistenceCounts(1, 1, 1), fixture.repository.counts())
     }
 
-    private fun securityFixture(): SecurityFixture {
+    @TestFactory
+    fun `accepted source punctuation creates instead of becoming a generator error`():
+        List<DynamicTest> =
+        listOf(
+            PunctuationCase(
+                label = "name",
+                name = "Synthetic Ltd.",
+                jobTitle = "Engineer",
+                hobby = "board games",
+                templateId = BioTemplateId.DELIGHTFUL_TWIST,
+            ),
+            PunctuationCase(
+                label = "job title",
+                name = "Synthetic Person",
+                jobTitle = "Engineer. Team lead",
+                hobby = "board games",
+                templateId = BioTemplateId.QUIRKY_SIDE_QUEST,
+            ),
+            PunctuationCase(
+                label = "selected hobby",
+                name = "Synthetic Person",
+                jobTitle = "Engineer",
+                hobby = "board games. Miniatures",
+                templateId = BioTemplateId.QUIRKY_SIDE_QUEST,
+            ),
+        ).map { case ->
+            DynamicTest.dynamicTest(case.label) {
+                val fixture = securityFixture(case.templateId)
+
+                fixture.mockMvc.perform(
+                    post("/persons")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(
+                            requestBody(
+                                jobTitle = case.jobTitle,
+                                hobbies = listOf(case.hobby),
+                                name = case.name,
+                            ),
+                        ),
+                )
+                    .andExpect(status().isCreated)
+                    .andExpect(jsonPath("$.name").value(case.name))
+                    .andExpect(jsonPath("$.jobTitle").value(case.jobTitle))
+                    .andExpect(jsonPath("$.hobbies[0]").value(case.hobby))
+                    .andExpect(jsonPath("$.bio").value(containsString(case.name)))
+                    .andExpect(jsonPath("$.bio").value(containsString(case.jobTitle)))
+                    .andExpect(jsonPath("$.bio").value(containsString(case.hobby)))
+
+                assertEquals(1, fixture.generator.invocations)
+                assertEquals(1, fixture.generator.networkRequests)
+                assertEquals(PersistenceCounts(1, 1, 1), fixture.repository.counts())
+            }
+        }
+
+    private fun securityFixture(
+        templateId: BioTemplateId = BioTemplateId.QUIRKY_SIDE_QUEST,
+    ): SecurityFixture {
         val repository = RecordingRepository()
-        val generator = NetworkSpyGenerator()
+        val generator = NetworkSpyGenerator(templateId)
         val service =
             CreatePersonService(
                 repository = repository,
@@ -147,10 +205,11 @@ class CreatePersonSecurityHttpTest {
     private fun requestBody(
         jobTitle: String,
         hobbies: List<String>,
+        name: String = "Synthetic Person",
     ): String =
         objectMapper.writeValueAsString(
             mapOf(
-                "name" to "Synthetic Person",
+                "name" to name,
                 "jobTitle" to jobTitle,
                 "hobbies" to hobbies,
                 "location" to
@@ -173,7 +232,17 @@ class CreatePersonSecurityHttpTest {
         val projections: Int,
     )
 
-    private class NetworkSpyGenerator : BioGenerator {
+    private data class PunctuationCase(
+        val label: String,
+        val name: String,
+        val jobTitle: String,
+        val hobby: String,
+        val templateId: BioTemplateId,
+    )
+
+    private class NetworkSpyGenerator(
+        private val templateId: BioTemplateId,
+    ) : BioGenerator {
         var invocations = 0
         var networkRequests = 0
 
@@ -181,7 +250,7 @@ class CreatePersonSecurityHttpTest {
             invocations++
             networkRequests++
             return BioGenerationResult.Template(
-                GeneratedBioTemplate.fromCatalog(BioTemplateId.QUIRKY_SIDE_QUEST),
+                GeneratedBioTemplate.fromCatalog(templateId),
             )
         }
     }
