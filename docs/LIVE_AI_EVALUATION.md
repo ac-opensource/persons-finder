@@ -11,11 +11,11 @@ tone, creativity, or relevance.
 
 The calibrated ceiling is 256 provider output tokens. The application
 independently accepts at most 512 model-authored code points and 732 final
-grounded code points. Paid calibration observed maxima of 70 output tokens and
-195 authored code points. Scaling those two-sentence maxima by 3/2 for the
-permitted third sentence gives 105 tokens and 293 code points, so the selected
-limits retain substantial explicit headroom. The final limit also reserves the
-existing 220-code-point maximum for locally grounded source values.
+grounded code points. Across all reviewed paid evidence, the observed maxima
+were 70 output tokens, 222 authored code points, 442 final grounded code points,
+and two sentences. The selected provider and authored limits therefore retain
+more than 3.6x and 2.3x the corresponding observed maxima. The final limit also
+reserves the existing 220-code-point maximum for locally grounded source values.
 
 The normal `test`, `check`, and `build` tasks remain credential-free and make no
 provider calls. `liveAiEval` is a separate, explicitly invoked, potentially
@@ -185,8 +185,9 @@ minute. Verify the selected project's current RPM, TPM, daily quota, and usage
 before the separate three-call smoke. If the active quota requires slower
 pacing, precommit a larger interval and rerun plan mode; never change it during
 an evidence run. Zero is an explicit unpaced configuration, not a missing
-control; it is the approved value for the paid OpenAI calibration. Any resulting
-rate-limit outcome still counts as a failure and is never retried.
+control; it is the approved value for the fixed paid OpenAI reliability
+protocol. Any resulting rate-limit outcome still counts as a failure and is
+never retried.
 
 The three-call live adapter smoke is compatibility and request-boundary
 preflight. It is not pooled into the 300 aggregate attempts. Let the applicable
@@ -312,9 +313,10 @@ produce aggregate counts; no prose or individual fingerprint is written.
 ## Recorded OpenAI evidence
 
 The historical diagnostic and limit-calibration runs are summarized below.
-Their machine-oriented JSON checkpoints are intentionally not tracked. The
-approved 12-case-by-25-repetition result will be published here only as one
-reviewed, human-readable, content-safe Markdown report after execution.
+Their machine-oriented JSON checkpoints are intentionally ignored and
+untracked. The passing 12-case-by-25-repetition result is preserved as one
+reviewed, human-readable, content-safe
+[Markdown report](evidence/live-ai/openai-7e02d65dc2895e6e618365021053c96f78ec8efb-12x25-passed.md).
 
 The first three-call smoke at revision
 `0d53d270729118e11023f2fdbf053accc82f717a` received three HTTP 200
@@ -362,8 +364,9 @@ cached/reasoning/tool tokens, a maximum of 59 output tokens, 188 authored code
 points, and two sentences. Latency was 1.394 seconds at p50 and 3.060 seconds at
 p95/max.
 
-Across all six reports, 45 provider calls reported 11,286 input and 2,243 output
-tokens. At the [standard published model rates used for the runs](https://developers.openai.com/api/docs/pricing)
+Across all six historical diagnostic and calibration reports, 45 provider calls
+reported 11,286 input and 2,243 output tokens. At the
+[standard published model rates used for the runs](https://developers.openai.com/api/docs/pricing)
 of USD 1.00 per million input tokens and USD 6.00 per million output tokens,
 estimated usage was USD 0.024744; `actual_billed_usd` remains unavailable
 without a provider billing export. These runs establish live compatibility and
@@ -371,6 +374,56 @@ provide limit-calibration evidence. The 42 post-fix calls were all valid, and
 the 27 calls at the final 256/512/732 limits were all valid. Each historical
 12-case run's zero-failure one-sided 95% Wilson upper bound is approximately
 18.4%, so none alone is a reliability result.
+
+### First 300-call aggregate and timeout finding
+
+At clean revision `465c648aebd2445e4f811700a35770af6befa425`, the first
+independent 12-case-by-25-repetition aggregate completed exactly 300 calls and
+300 delegated HTTP sends. It produced 299 valid results and one timeout, with no
+retry, top-up, provider fallback, invalid output, policy rejection, rate limit,
+unavailability, cancellation, hard-boundary violation, or harness error. The
+single timeout occurred with a 9,999 ms request timeout and was recorded at
+10,001 ms by the transport. The resulting one-sided 95% Wilson upper failure
+bound was 1.480096%, so the run correctly failed the 1% reliability gate.
+
+The 299 successful results had a 2.022-second p95 and 5.825-second maximum
+transport latency. The run recorded maxima of 65 output tokens, 222 authored
+code points, and 442 final grounded code points. Provider usage was 74,899 input
+tokens and 14,529 output tokens, for an estimated USD 0.162073 at the stated
+standard rates.
+
+That evidence showed a deadline-bound transport failure rather than a prose,
+policy, schema, or request-boundary failure. The shared generation deadline was
+therefore increased from 10,000 ms to 15,000 ms. The fresh protocol binds that
+15,000 ms application deadline into its plan and provenance; per-request
+timeouts use the remaining deadline and may be one millisecond lower. This
+change does not relax the 256-token, 512-authored-code-point,
+732-final-code-point, sentence, placeholder, ASCII, policy, or grounding gates.
+
+### Fresh 300-call aggregate after the deadline fix
+
+At clean revision `7e02d65dc2895e6e618365021053c96f78ec8efb`, the fresh
+12-case-by-25-repetition aggregate again completed exactly 300 calls and 300
+delegated HTTP sends. All 300 responses were HTTP 200 `completed` and all 300
+passed the deterministic application contract. There were 293 distinct valid
+outputs and zero failures, retries, top-ups, provider fallbacks, hard-boundary
+violations, or harness errors. The one-sided 95% Wilson upper failure bound was
+0.893787%, which passes the precommitted 1% overall gate.
+
+Application latency was 1.388158 seconds at p50, 2.275301 seconds at p95, and
+5.994904 seconds at maximum; maximum transport latency was 5,993 ms. The run
+used the configured 15,000 ms generation deadline and recorded a 14,999 ms
+maximum request timeout. It reported 75,150 input tokens and 14,644 output
+tokens, for an estimated USD 0.163014. Observed maxima were 63 output tokens,
+199 authored code points, 419 final grounded code points, and two sentences,
+against the precommitted 256/512/732 limits.
+
+The failed and passing aggregates are independent fixed runs. Their samples,
+failure counts, and Wilson statistics are not pooled; the passing result gates
+only revision `7e02d65dc2895e6e618365021053c96f78ec8efb` under its recorded
+provider conditions. Including the six historical diagnostic/calibration
+reports and both aggregates, estimated paid usage was USD 0.349831.
+`actual_billed_usd` remains unavailable without a provider billing export.
 
 The Wilson bound is conditional on this fixed, equally weighted synthetic
 corpus and the provider conditions during the recorded run. It is not a claim

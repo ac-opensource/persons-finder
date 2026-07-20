@@ -114,6 +114,12 @@ script explicitly disables live-provider configuration and records
 The separately gated paid nondeterministic protocol and its human-readable,
 content-safe evidence report are documented in
 [`docs/LIVE_AI_EVALUATION.md`](docs/LIVE_AI_EVALUATION.md).
+The completed fresh OpenAI run made exactly 12 x 25 = 300 calls at revision
+`7e02d65dc2895e6e618365021053c96f78ec8efb`: all 300 passed the deterministic
+application contract, with a one-sided 95% Wilson upper failure bound of
+0.8938%. Review the
+[human-readable paid-run report](docs/evidence/live-ai/openai-7e02d65dc2895e6e618365021053c96f78ec8efb-12x25-passed.md);
+machine-oriented JSON remains ignored and untracked.
 
 ### Run the core stack manually
 

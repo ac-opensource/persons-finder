@@ -15,7 +15,7 @@
 | Code scope | Current working tree; no release or commit hash asserted |
 | Primary concern | Prompt injection, PII egress, unsafe model output, and failure atomicity |
 | Verification command | `./gradlew test --console=plain` |
-| Recorded result | 297 tests: 294 passed, 0 failed, 3 intentionally skipped live-provider evaluations |
+| Recorded result | 320 tests: 317 passed, 0 failed, 3 intentionally skipped opt-in live-provider evaluations |
 
 ## Executive summary
 
@@ -45,13 +45,14 @@ Included:
 - provider request and structured-output contracts;
 - provider response-size, timeout, redirect, and diagnostic boundaries;
 - local bio rendering and final-output invariants;
-- error sanitization and persistence atomicity; and
+- error sanitization and persistence atomicity;
 - the real HTTP/PostGIS rejection path for the challenge attack; and
-- sanitized paid OpenAI compatibility and calibration evidence.
+- sanitized paid OpenAI compatibility, calibration, and fixed-corpus evidence.
 
 Excluded:
 
-- the approved 300-call live-provider reliability run, pending execution;
+- production-wide reliability claims beyond the recorded fixed synthetic corpus;
+- provider billing-export evidence or an actual-charge claim;
 - internet-facing authentication, authorization, and per-caller quotas;
 - third-party provider contractual, retention, residency, and subprocessor
   review;
@@ -181,12 +182,23 @@ report does not claim that control is implemented.
    inspection. The approval accepts provider data use only for the fixed
    synthetic fixtures and versioned corpus; it neither claims logging is
    disabled nor authorizes customer/production data.
-2. Treat the successful three-call and 12-case `gpt-5.6-luna` runs as
-   compatibility and limit-calibration evidence only. Complete the approved
-   25-pass, 300-call fixed-corpus reliability run and retain its overall-only
-   statistical caveat. The final calibrated 256-token ceiling passed a separate
-   3/3 smoke and two 12/12 fixed-corpus runs; the latest calibration recorded
-   all maximum-source grounded lengths.
+2. Retain the two independent 300-call `gpt-5.6-luna` outcomes without pooling
+   them. Revision `465c648` produced 299/300 valid results and failed the 1%
+   gate after one request reached 9,999 milliseconds under the prior 10-second
+   deadline and 10,001 milliseconds at the transport; it was not retried or
+   topped up and had an estimated USD 0.162073 cost. After raising the
+   configured deadline to 15 seconds,
+   fresh revision `7e02d65dc2895e6e618365021053c96f78ec8efb` produced 300/300
+   valid results from exactly 300 sends, with no retry, top-up, fallback,
+   boundary violation, or harness error. Its one-sided 95% Wilson upper failure
+   bound was 0.008937872175128179, so that run alone passed the precommitted 1%
+   gate. It recorded 293 distinct outputs; p50/p95/max latency of
+   1.388158/2.275301/5.994904 seconds; 75,150 input and 14,644 output tokens;
+   and maxima of 63 output tokens, 199 authored code points, 419 grounded code
+   points, and two sentences. The USD 0.163014 run cost and USD 0.349831 total
+   paid-evidence cost are estimates, not actual provider billing. Preserve the
+   [content-safe report](evidence/live-ai/openai-7e02d65dc2895e6e618365021053c96f78ec8efb-12x25-passed.md)
+   and its fixed-corpus caveat.
 3. Keep remote mode on private networking until authenticated, rate-limited
    ingress and cost budgets are implemented and tested.
 4. Complete provider privacy, retention, residency, subprocessor, and incident
