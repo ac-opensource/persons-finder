@@ -122,7 +122,12 @@ Remote providers receive a strict JSON schema whose only property is
 `bio_template`. The application caps the extracted output, enables duplicate-key
 detection, and rejects malformed or trailing JSON, extra fields, non-string
 values, missing or mutated placeholders, more than three sentences, excessive
-literal or final length, policy violations, and unsafe Unicode.
+literal or final length, policy violations, and unsafe Unicode. Model-authored
+literal prose also rejects the standalone words `prompt`, `prompts`,
+`instruction`, and `instructions`; word boundaries preserve benign words such
+as `promptly` and `instructional`. This check runs before trusted one-pass
+composition, so opaque validated local source containing those words is not
+reinterpreted.
 
 Evidence:
 
@@ -167,6 +172,7 @@ report does not claim that control is implemented.
 | Attack term split with ZWJ or ZWNJ | Rejected before generation | Bio policy and privacy-boundary tests |
 | Bidi override, isolate, or invisible format control | Sanitized 400 before service invocation | Domain and controller tests |
 | Unsafe or structurally invalid provider prose | `INVALID_OUTPUT` or `POLICY_REJECTED` | Remote adapter tests |
+| Standalone model-authored `prompt(s)` or `instruction(s)` | `POLICY_REJECTED`; `promptly` and `instructional` remain valid | Template and remote-adapter policy tests |
 | Duplicate, extra, trailing, or non-string provider output | `INVALID_OUTPUT` | Remote adapter tests |
 | Oversized provider response | Subscription cancelled and failure normalized | HTTP transport and provider-client tests |
 | Missing, duplicate, mutated, escaped, wrapped, or unknown placeholder | `BIO_GENERATION_INVALID`; no writes | Application template and transaction tests |
@@ -182,22 +188,25 @@ report does not claim that control is implemented.
    inspection. The approval accepts provider data use only for the fixed
    synthetic fixtures and versioned corpus; it neither claims logging is
    disabled nor authorizes customer/production data.
-2. Retain the two independent 300-call `gpt-5.6-luna` outcomes without pooling
-   them. Revision `465c648` produced 299/300 valid results and failed the 1%
-   gate after one request reached 9,999 milliseconds under the prior 10-second
-   deadline and 10,001 milliseconds at the transport; it was not retried or
-   topped up and had an estimated USD 0.162073 cost. After raising the
-   configured deadline to 15 seconds,
-   fresh revision `7e02d65dc2895e6e618365021053c96f78ec8efb` produced 300/300
-   valid results from exactly 300 sends, with no retry, top-up, fallback,
+2. Retain all three independent 300-call `gpt-5.6-luna` outcomes without
+   pooling them. Revision `465c648` produced 299/300 valid and failed the 1%
+   gate after one request reached the prior 10-second deadline. Revision
+   `7e02d65dc2895e6e618365021053c96f78ec8efb` passed 300/300 after the deadline
+   changed to 15 seconds, but raw prose was intentionally absent, so that run
+   cannot be reclassified under the later stricter output policy. Final-policy
+   revision `316be4ab57c424aae4fbb5a2ecc9b43e2fb612da` independently repeated the
+   exact 12-by-25 protocol under the 15-second deadline and produced 300/300
+   valid and 298 distinct results from exactly 300 sends, all HTTP 200 and
+   completed, with zero failure, policy rejection, retry, top-up, fallback,
    boundary violation, or harness error. Its one-sided 95% Wilson upper failure
-   bound was 0.008937872175128179, so that run alone passed the precommitted 1%
-   gate. It recorded 293 distinct outputs; p50/p95/max latency of
-   1.388158/2.275301/5.994904 seconds; 75,150 input and 14,644 output tokens;
-   and maxima of 63 output tokens, 199 authored code points, 419 grounded code
-   points, and two sentences. The USD 0.163014 run cost and USD 0.349831 total
-   paid-evidence cost are estimates, not actual provider billing. Preserve the
-   [content-safe report](evidence/live-ai/openai-7e02d65dc2895e6e618365021053c96f78ec8efb-12x25-passed.md)
+   bound was 0.008937872175128179; p50/p95/max application latency was
+   1.329511/2.704556/6.404460 seconds and transport maximum was 6,402
+   milliseconds. It reported 75,150 input and 14,595 output tokens and maxima
+   of 64 output tokens, 196 authored code points, 416 grounded code points, and
+   two sentences. Its USD 0.162720 cost and the USD 0.512551 total across all
+   945 paid-evidence calls are estimates; actual billing remains unknown. Only
+   this final-policy run gates its exact revision. Preserve the
+   [content-safe report](evidence/live-ai/openai-316be4ab57c424aae4fbb5a2ecc9b43e2fb612da-12x25-passed.md)
    and its fixed-corpus caveat.
 3. Keep remote mode on private networking until authenticated, rate-limited
    ingress and cost budgets are implemented and tested.

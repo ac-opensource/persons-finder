@@ -58,6 +58,9 @@ provider output tokens. Accepted prose must:
 - contain one to three sentences;
 - contain exactly one `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`;
 - contain no unknown placeholder or forbidden region;
+- contain no standalone model-authored `prompt`, `prompts`, `instruction`, or
+  `instructions` meta-language; word boundaries preserve benign words such as
+  `promptly` and `instructional`;
 - contain printable ASCII only; and
 - stay within 512 non-placeholder Unicode code points.
 
@@ -66,7 +69,9 @@ and selected original hobby as opaque values. It checks exact grounding and a
 final 732-code-point limit: the 512-point prose allowance plus the existing
 220-point maximum for the selected local values. These limits retain substantial
 headroom over the paid calibration maxima without relaxing the sentence,
-placeholder, character, policy, or grounding checks. Model output remains
+placeholder, character, policy, or grounding checks. The model-authored
+meta-language policy is applied before composition, so matching words in opaque
+validated local source values are not reinterpreted. Model output remains
 untrusted data, not an instruction or authorization source.
 
 Bio policy, generation, parsing, validation, and composition all complete
@@ -135,21 +140,24 @@ review before any production use.
 
 The following controls are not implemented:
 
-- production-wide reliability evidence for the remote model. Two independent
+- production-wide reliability evidence for the remote model. Three independent
   paid OpenAI fixed-corpus runs were completed without retries, top-ups, or
-  fallback. Revision `465c648` produced 299 valid results from 300 sends; its
-  single 9,999-millisecond request timeout under the prior 10-second deadline
-  (10,001 milliseconds at the transport) yielded a 1.4801% one-sided 95%
-  Wilson upper failure bound and failed the 1% gate. Its estimated cost was USD
-  0.162073. After the configured deadline was raised to 15 seconds, fresh revision
-  `7e02d65dc2895e6e618365021053c96f78ec8efb` independently produced 300/300
-  valid results, 293 distinct outputs, and a 0.8938% upper bound, so that run
-  passed. All 300 final-run responses were HTTP 200 and completed; p50/p95/max
-  end-to-end latency was 1.388/2.275/5.995 seconds. The final run reported
-  75,150 input and 14,644 output tokens, with an estimated USD 0.163014 cost;
-  the estimated total across all paid evidence is USD 0.349831, not an actual
-  billing claim. The runs are not pooled and only the fresh run gates its exact
-  revision. The [content-safe report](docs/evidence/live-ai/openai-7e02d65dc2895e6e618365021053c96f78ec8efb-12x25-passed.md)
+  fallback and are not pooled. Revision `465c648` produced 299/300 valid and
+  failed the 1% Wilson gate after one request reached the prior 10-second
+  deadline. Revision `7e02d65dc2895e6e618365021053c96f78ec8efb` then passed
+  300/300 under the 15-second deadline, but its intentionally content-free
+  evidence cannot reclassify those outputs under the later, stricter
+  model-authored meta-language policy. Final-policy revision
+  `316be4ab57c424aae4fbb5a2ecc9b43e2fb612da` independently repeated the exact
+  12-by-25 protocol under the 15-second deadline and produced 300/300 valid
+  results and 298 distinct outputs, with a 0.8938% one-sided 95% Wilson upper
+  bound. All 300 responses were HTTP 200 and completed; p50/p95/max
+  application latency was 1.330/2.705/6.404 seconds. The final run reported
+  75,150 input and 14,595 output tokens and an estimated USD 0.162720 cost.
+  Across all paid evidence, 945 calls reported 236,485 input and 46,011 output
+  tokens, for an estimated USD 0.512551 rather than an actual billing claim.
+  Only the final-policy run gates its exact revision. The
+  [content-safe report](docs/evidence/live-ai/openai-316be4ab57c424aae4fbb5a2ecc9b43e2fb612da-12x25-passed.md)
   records the fixed synthetic conditions. This evidence does not predict all
   future provider or production behavior;
 - authentication, authorization, tenant isolation, or ownership checks;

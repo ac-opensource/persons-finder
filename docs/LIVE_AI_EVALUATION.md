@@ -6,8 +6,10 @@ The live evaluator measures whether one explicitly selected provider/model
 reliably authors structurally valid bio prose from the application-owned safe
 category request. A valid result is one to three sentences with the exact
 grounding placeholders, within the deterministic policy and length bounds. The
-evaluator does not use exact-string assertions and does not grade subjective
-tone, creativity, or relevance.
+final policy also rejects standalone model-authored `prompt`, `prompts`,
+`instruction`, or `instructions` before persistence. The evaluator does not use
+exact-string assertions and does not grade subjective tone, creativity, or
+relevance.
 
 The calibrated ceiling is 256 provider output tokens. The application
 independently accepts at most 512 model-authored code points and 732 final
@@ -312,11 +314,15 @@ produce aggregate counts; no prose or individual fingerprint is written.
 
 ## Recorded OpenAI evidence
 
-The historical diagnostic and limit-calibration runs are summarized below.
+The historical diagnostic, limit-calibration, and reliability runs are
+summarized below.
 Their machine-oriented JSON checkpoints are intentionally ignored and
-untracked. The passing 12-case-by-25-repetition result is preserved as one
+untracked. The stricter final 12-case-by-25-repetition result is preserved as a
 reviewed, human-readable, content-safe
-[Markdown report](evidence/live-ai/openai-7e02d65dc2895e6e618365021053c96f78ec8efb-12x25-passed.md).
+[Markdown report](evidence/live-ai/openai-316be4ab57c424aae4fbb5a2ecc9b43e2fb612da-12x25-passed.md).
+The earlier
+[post-deadline report](evidence/live-ai/openai-7e02d65dc2895e6e618365021053c96f78ec8efb-12x25-passed.md)
+remains available as historical evidence.
 
 The first three-call smoke at revision
 `0d53d270729118e11023f2fdbf053accc82f717a` received three HTTP 200
@@ -400,7 +406,7 @@ timeouts use the remaining deadline and may be one millisecond lower. This
 change does not relax the 256-token, 512-authored-code-point,
 732-final-code-point, sentence, placeholder, ASCII, policy, or grounding gates.
 
-### Fresh 300-call aggregate after the deadline fix
+### Post-deadline 300-call aggregate
 
 At clean revision `7e02d65dc2895e6e618365021053c96f78ec8efb`, the fresh
 12-case-by-25-repetition aggregate again completed exactly 300 calls and 300
@@ -418,12 +424,40 @@ tokens, for an estimated USD 0.163014. Observed maxima were 63 output tokens,
 199 authored code points, 419 final grounded code points, and two sentences,
 against the precommitted 256/512/732 limits.
 
-The failed and passing aggregates are independent fixed runs. Their samples,
-failure counts, and Wilson statistics are not pooled; the passing result gates
-only revision `7e02d65dc2895e6e618365021053c96f78ec8efb` under its recorded
-provider conditions. Including the six historical diagnostic/calibration
-reports and both aggregates, estimated paid usage was USD 0.349831.
-`actual_billed_usd` remains unavailable without a provider billing export.
+Codex review then identified a policy gap: standalone model-authored
+`prompt`, `prompts`, `instruction`, or `instructions` were not independently
+rejected. Revision `7e02d65dc2895e6e618365021053c96f78ec8efb` passed its
+recorded contract, but its content-safe report intentionally retained no prose,
+so its 300 outputs could not be reclassified against the stricter policy.
+
+### Final 300-call aggregate under the stricter policy
+
+After adding the deterministic standalone-word rejection, clean revision
+`316be4ab57c424aae4fbb5a2ecc9b43e2fb612da` reran the exact same
+12-case-by-25-repetition protocol. This was a fresh reliability run, not another
+calibration, a retry, or a top-up. It completed exactly 300 calls and 300
+delegated HTTP sends. All 300 responses were HTTP 200 `completed` and all 300
+passed the stricter application contract. There were 298 distinct valid
+outputs and zero failures, policy rejections, retries, top-ups, provider
+fallbacks, hard-boundary violations, or harness errors. The one-sided 95%
+Wilson upper failure bound was 0.893787%, which passes the precommitted 1%
+overall gate.
+
+Application latency was 1.329511 seconds at p50, 2.704556 seconds at p95, and
+6.404460 seconds at maximum; maximum transport latency was 6,402 ms. The run
+used the configured 15,000 ms generation deadline. It reported 75,150 input
+tokens and 14,595 output tokens, for an estimated USD 0.162720. Observed maxima
+were 64 output tokens, 196 authored code points, 416 final grounded code points,
+and two sentences, against the precommitted 256/512/732 limits.
+
+All three 300-call aggregates are independent fixed runs. Their samples,
+failure counts, and Wilson statistics are not pooled. The final passing result
+gates only revision `316be4ab57c424aae4fbb5a2ecc9b43e2fb612da` under its
+recorded provider conditions and stricter policy. Including the six historical
+diagnostic/calibration reports and all three aggregates, the paid evidence
+comprises 945 calls, 236,485 input tokens, and 46,011 output tokens, with
+estimated usage of USD 0.512551. `actual_billed_usd` remains unavailable
+without a provider billing export.
 
 The Wilson bound is conditional on this fixed, equally weighted synthetic
 corpus and the provider conditions during the recorded run. It is not a claim

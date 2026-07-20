@@ -224,16 +224,19 @@ always omitted in this slice. Locale/country are deployment output context and
 never assert customer location, nationality, or identity.
 
 Remote provider output is one strict `bio_template` JSON string authored by the
-selected model. The remote adapter caps and strictly parses the JSON, rejecting
-duplicate or extra fields, trailing content, and non-string values. The
+selected model. The request permits at most 256 provider output tokens, and the
+remote adapter caps and strictly parses the JSON, rejecting duplicate or extra
+fields, trailing content, and non-string values. The
 application boundary independently requires exactly one each of `{{NAME}}`,
 `{{JOB}}`, and `{{HOBBY}}`, no unknown token, one to three safe sentences,
 printable ASCII, at most 512 non-placeholder code points, and no forbidden
-region disclosure. A trusted parser renders validated source values once as
-opaque segments, verifies exact grounding, and checks the final 732-code-point
-contract before persistence. The one-to-three-sentence rule applies to the
-model-authored template; punctuation inside opaque source values is not
-reparsed as model-authored sentence structure.
+region disclosure or standalone model-authored `prompt`, `prompts`,
+`instruction`, or `instructions` meta-language. Word boundaries preserve
+benign `promptly` and `instructional`. A trusted parser then renders validated
+source values once as opaque segments, verifies exact grounding, and checks the
+final 732-code-point contract before persistence. Model-authored policy and the
+one-to-three-sentence rule are applied before composition; opaque source values
+are not reinterpreted or reparsed as model-authored content.
 
 The opt-in network adapter preserves this allowlist, logs metadata only,
 normalizes failures, and never silently falls back. Unknown adapter
