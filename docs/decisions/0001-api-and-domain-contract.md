@@ -175,13 +175,18 @@ topics are not rejection criteria.
 
 ### Domain and application boundaries
 
-Canonical profile text, public IDs, geographic points, radii, client
-timestamps, immutable observations, and last-known winner selection are domain
-concepts. Public request/response classes remain separate from future
-persistence rows.
+Canonical profile text, public IDs, geographic points, client timestamps,
+immutable observations, and last-known winner selection are shared domain
+concepts. Search radius is a nearby-specific domain concept. Public
+request/response classes remain separate from persistence rows.
 
-Controller orchestration uses application-owned create and update use cases and
-an application-owned direct-JDBC `PersonRepository` port.
+The service uses feature-first hexagonal architecture with use-case slices.
+Create and update each own their public schemas, controller, application
+service, outcomes, and repository port. One shared direct-JDBC command
+adapter implements those two ports because both use cases change the same
+transactional person, observation, and last-known model. Nearby owns a separate
+query service, repository port, and PostGIS/JDBC adapter; nearby reads must
+not expand the shared command repository into a general persistence hub.
 Bio generation uses an application-owned, provider/model-neutral
 `BioGenerator` request/result/failure contract. `BioTemplateRequest` can contain
 only literal `{{NAME}}`, constants `en-NZ` and `NZ`, required `job-v1` broad job
@@ -229,6 +234,10 @@ person, initial observation, and projection.
 
 - Controllers can remain thin and map between public schemas and invariant
   domain/application types.
+- Capability-oriented packages expose create, update-location, and nearby use
+  cases without top-level controller/service/repository buckets.
+- Shared command persistence remains explicit, while nearby query SQL and its
+  performance lifecycle stay owned by the nearby slice.
 - Location updates have one both-or-neither contract with defined no-key and
   keyed retry semantics.
 - Exact wire errors and privacy rules are testable without persistence.
@@ -236,10 +245,13 @@ person, initial observation, and projection.
 
 ## Out of scope
 
-Nearby search, its GiST index/migration, external bio adapters, authentication,
-mobile code, and deferred product features are outside this slice. Retention,
-erasure, purge repair, post-purge replay, restore, receipt/HMAC design, and key
-rotation remain lifecycle questions requiring separate human approval.
+The public nearby HTTP endpoint, its GiST index/migration, complete spatial-edge
+evidence, external bio adapters, authentication, mobile code, and deferred
+product features are outside this slice. The nearby query port and JDBC/PostGIS
+adapter are structured separately so that follow-on work cannot grow the shared
+command repository. Retention, erasure, purge repair, post-purge replay,
+restore, receipt/HMAC design, and key rotation remain lifecycle questions
+requiring separate human approval.
 
 ## Planned evidence
 
@@ -249,3 +261,5 @@ rotation remain lifecycle questions requiring separate human approval.
   template parsing/composition, timestamps, and coordinates.
 - Fresh real-PostGIS Flyway/schema checks plus transaction, rollback, keyed
   replay/conflict, late-event, and concurrent no-key evidence.
+- Focused real-PostGIS evidence for the separately owned nearby query adapter;
+  its public controller, GiST plan, and full edge matrix remain follow-on work.
