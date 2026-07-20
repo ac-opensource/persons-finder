@@ -7,6 +7,15 @@ import java.time.Duration
 import tools.jackson.core.JacksonException
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import tools.jackson.databind.node.ObjectNode
+
+internal const val OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN =
+    """^([^{}]*\{\{NAME\}\}[^{}]*\{\{JOB\}\}[^{}]*\{\{HOBBY\}\}[^{}]*|""" +
+        """[^{}]*\{\{NAME\}\}[^{}]*\{\{HOBBY\}\}[^{}]*\{\{JOB\}\}[^{}]*|""" +
+        """[^{}]*\{\{JOB\}\}[^{}]*\{\{NAME\}\}[^{}]*\{\{HOBBY\}\}[^{}]*|""" +
+        """[^{}]*\{\{JOB\}\}[^{}]*\{\{HOBBY\}\}[^{}]*\{\{NAME\}\}[^{}]*|""" +
+        """[^{}]*\{\{HOBBY\}\}[^{}]*\{\{NAME\}\}[^{}]*\{\{JOB\}\}[^{}]*|""" +
+        """[^{}]*\{\{HOBBY\}\}[^{}]*\{\{JOB\}\}[^{}]*\{\{NAME\}\}[^{}]*)$"""
 
 internal class OpenAiModelProviderClient(
     private val apiKey: String,
@@ -54,7 +63,7 @@ internal class OpenAiModelProviderClient(
     }
 
     private fun ModelGenerationRequest.toOpenAiBody(): Map<String, Any> =
-        mapOf(
+        linkedMapOf<String, Any>(
             "model" to model,
             "instructions" to instructions,
             "input" to inputJson,
@@ -67,10 +76,28 @@ internal class OpenAiModelProviderClient(
                             "type" to "json_schema",
                             "name" to "bio_template",
                             "strict" to true,
-                            "schema" to objectMapper.readTree(outputSchemaJson),
+                            "schema" to openAiOutputSchema(outputSchemaJson),
                         ),
                 ),
+        ).apply {
+            if (model == GPT_5_6_ALIAS || model.startsWith(GPT_5_6_PREFIX)) {
+                put("reasoning", mapOf("effort" to "none"))
+            }
+        }
+
+    private fun openAiOutputSchema(outputSchemaJson: String): JsonNode {
+        val schema = objectMapper.readTree(outputSchemaJson)
+        val bioTemplateSchema =
+            schema.path("properties").path("bio_template") as? ObjectNode
+                ?: throw IllegalArgumentException(
+                    "OpenAI bio output schema requires a bio_template object",
+                )
+        bioTemplateSchema.put(
+            "pattern",
+            OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
         )
+        return schema
+    }
 
     private fun parseResponse(response: ProviderHttpResponse): ModelProviderResult {
         failureForHttpStatus(response.statusCode)?.let {
@@ -87,7 +114,10 @@ internal class OpenAiModelProviderClient(
             } catch (_: RuntimeException) {
                 return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
             }
-        return when (body.path("status").stringValue()) {
+        if (body.textValue("object") != "response") {
+            return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
+        }
+        return when (body.textValue("status")) {
             "completed" -> extractCompletedOutput(body)
             "incomplete" -> ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
             else -> ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
@@ -95,19 +125,34 @@ internal class OpenAiModelProviderClient(
     }
 
     private fun extractCompletedOutput(body: JsonNode): ModelProviderResult {
+        val output = body.path("output")
+        if (!output.isArray) {
+            return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
+        }
+        val messages =
+            output.filter { item ->
+                item.textValue("type") == "message"
+            }
+        if (
+            messages.size != 1 ||
+            messages.single().textValue("role") != "assistant" ||
+            messages.single().textValue("status") != "completed"
+        ) {
+            return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
+        }
+        val content = messages.single().path("content")
+        if (!content.isArray) {
+            return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
+        }
         val texts = mutableListOf<String>()
         var refused = false
-        body.path("output").forEach { output ->
-            if (output.path("type").stringValue() == "message") {
-                output.path("content").forEach { content ->
-                    when (content.path("type").stringValue()) {
-                        "output_text" -> content.get("text")?.takeIf(JsonNode::isString)?.let {
-                            texts += it.stringValue()
-                        }
-
-                        "refusal" -> refused = true
-                    }
+        content.forEach { item ->
+            when (item.textValue("type")) {
+                "output_text" -> item.get("text")?.takeIf(JsonNode::isString)?.let {
+                    texts += it.stringValue()
                 }
+
+                "refusal" -> refused = true
             }
         }
         return when {
@@ -117,7 +162,12 @@ internal class OpenAiModelProviderClient(
         }
     }
 
+    private fun JsonNode.textValue(fieldName: String): String? =
+        get(fieldName)?.takeIf(JsonNode::isString)?.stringValue()
+
     private companion object {
         val RESPONSES_URI: URI = URI.create("https://api.openai.com/v1/responses")
+        const val GPT_5_6_ALIAS = "gpt-5.6"
+        const val GPT_5_6_PREFIX = "gpt-5.6-"
     }
 }

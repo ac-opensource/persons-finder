@@ -1,116 +1,193 @@
 # Security and Privacy
 
-A worked example of how these controls can be reported is available in
-[`docs/SECURITY_REPORT_SAMPLE.md`](docs/SECURITY_REPORT_SAMPLE.md). It is
-explicitly scoped as an internal sample, not an external audit or certification.
+This document describes controls present in the core candidate and separates
+them from production controls that have not been implemented. It is not an
+external audit or certification.
 
-## Implemented bio-generation boundary
+## Implemented core controls
 
-`POST /persons` validates and canonicalizes profile fields before bio
-generation. A narrow source policy rejects deterministic instruction-
-manipulation patterns and explicit credential or identifier patterns in job
-titles and hobbies. The policy scans an NFKC-normalized security copy, then
-canonically decomposes it and removes combining marks used to split attack
-keywords. Default-ignorable format characters and variation selectors are also
-removed, while stored profile text remains NFC-canonical.
-Names are not scanned by that heuristic because names never participate in bio
-generation. Profile validation rejects controls, separators, and Unicode format
-controls used for bidi or invisible-text deception; ZWJ and ZWNJ remain allowed
-for legitimate scripts and emoji.
+### API input and error handling
 
-The application does not send raw profile fields to a remote model. `BioPolicy`
-maps exact, reviewed whole-value aliases into a closed `BioTemplateRequest`.
-The outbound allowlist is limited to:
+- Request bodies reject unknown JSON properties. The nearby endpoint also
+  rejects unknown, repeated, missing, empty, non-finite, and out-of-range query
+  parameters.
+- Profile text is validated by Unicode code-point bounds, trimmed, and stored in
+  NFC form. Controls, line/paragraph separators, malformed text, and most
+  Unicode format controls are rejected; ZWJ and ZWNJ remain allowed for
+  legitimate scripts and emoji.
+- A separate NFKC security view of job titles and hobbies is canonically
+  decomposed with combining marks, default-ignorable characters, and variation
+  selectors removed, then checked individually and across field boundaries for
+  the approved narrow instruction-manipulation and explicit
+  credential/identifier patterns. Names are not scanned because they never
+  enter remote generation. Ordinary validation failures return 400; unsafe bio
+  source input returns 422.
+- Error responses use bounded `application/problem+json` fields and stable
+  codes. They do not include submitted values, coordinates, stack traces, or
+  provider details.
 
-- the literal display-name token `{{NAME}}`;
-- deployment locale `en-NZ` and country code `NZ`;
-- one broad job-category code plus its mapping version;
-- nonempty, deduplicated broad interest codes plus their mapping version;
-- the fixed `quirky` tone; and
-- an optional closed macro-region code, which is currently default-off.
+### Bio generation, prompt injection, and egress
 
-Raw names, job titles, employers, hobbies, places, coordinates, person or
-observation identifiers, credentials, and person-derived transport metadata
-cannot be represented by this request type. Sensitive, rare, or unmatched job
-and hobby values map to the broad `other` code.
+The default core runtime uses a deterministic, credential-free `BioGenerator`.
+The code also contains an opt-in remote adapter, but the tracked Compose stack
+does not enable it or mount model credentials.
 
-The remote adapter serializes that allowlist as data and instructs the model to
-treat every field as inert. OpenAI, Gemini, and Anthropic use provider-native
-structured JSON output constraints for an object containing only
-`template_id`, whose value is one of three application-owned IDs. This is
-defence in depth, not trust in the provider: the application caps the output
-size, enables duplicate-key detection, rejects malformed JSON, trailing
-content, extra fields, non-string values, and unknown IDs, and never accepts
-provider-authored prose.
+Before any remote call, `BioPolicy` maps exact reviewed aliases into an
+application-owned `BioTemplateRequest`. Its outbound allowlist contains only:
 
-Local code resolves the selected ID to a reviewed application-owned template.
-The application boundary independently normalizes and validates that template:
-it must be one safe sentence with exactly one literal `{{NAME}}`, `{{JOB}}`,
-and `{{HOBBY}}`, no unknown token, and no forbidden region disclosure. A
-trusted parser then renders the validated name, raw job title, and selected
-original hobby once as opaque segments without rescanning inserted text.
-Grounding and final validation run after composition, including the
-240-Unicode-code-point limit.
+- literal `{{NAME}}`, locale `en-NZ`, country `NZ`, and tone `quirky`;
+- one broad job-category code and mapping version; and
+- nonempty, deduplicated broad interest codes and their mapping version.
 
-Bio policy, provider, parsing, validation, or composition failure occurs before
-the person/location transaction starts, so it leaves no partial state. Provider
-errors are normalized centrally: unsafe source input is 422, invalid or unsafe
-generated output is 502, and timeout/rate-limit/unavailability is 503.
-Cancellation propagates instead of becoming an application error.
-Configuration selects exactly one provider and model, and there is no
-cross-provider or deterministic runtime fallback.
+The optional macro-region field is disabled by default. Raw names, job titles,
+employers, hobbies, places, coordinates, person or observation identifiers,
+credentials, and person-derived transport metadata are not fields in the
+outbound request. Unmatched or sensitive source values map to the broad
+`other` code.
 
-## Credentials, transport, and observability
+The remote clients request a JSON object containing only `bio_template`. The
+application rejects an oversized response, malformed JSON, duplicate keys,
+trailing content, extra fields, non-string values, and prose outside the
+deterministic template contract. OpenAI additionally receives a strict string
+pattern that permits each of the six possible orders of the three required
+placeholders while requiring each placeholder exactly once. This provider-side
+constraint reduces invalid generations; the provider-neutral application
+validator remains authoritative. The calibrated request allows up to 256
+provider output tokens. Accepted prose must:
 
-Provider credentials are read from environment or mounted-secret
-configuration. They are sent only in the provider authorization header and are
-never included in request JSON. Invalid remote configuration fails startup.
+- contain one to three sentences;
+- contain exactly one `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`;
+- contain no unknown placeholder or forbidden region;
+- contain no standalone model-authored `prompt`, `prompts`, `instruction`, or
+  `instructions` meta-language; word boundaries preserve benign words such as
+  `promptly` and `instructional`;
+- contain printable ASCII only; and
+- stay within 512 non-placeholder Unicode code points.
 
-Provider endpoints are fixed HTTPS origins in the respective clients. Redirects
-are disabled, calls have bounded timeouts, and a back-pressured HTTP body
-subscriber cancels before buffering more than 65,536 response bytes.
-Request/response diagnostic representations omit headers and bodies.
-Application logs must remain metadata-only: do not log profile fields,
-coordinates, prompts, provider responses, generated bios, or credentials.
+A trusted one-pass composer then inserts the validated local name, job title,
+and selected original hobby as opaque values. It checks exact grounding and a
+final 732-code-point limit: the 512-point prose allowance plus the existing
+220-point maximum for the selected local values. These limits retain substantial
+headroom over the paid calibration maxima without relaxing the sentence,
+placeholder, character, policy, or grounding checks. The model-authored
+meta-language policy is applied before composition, so matching words in opaque
+validated local source values are not reinterpreted. Model output remains
+untrusted data, not an instruction or authorization source.
 
-The evaluator-default runtime remains deterministic, offline, and
-credential-free. Remote generation is an explicit network/private opt-in. That
-mode name is a deployment precondition, not an access-control mechanism:
-deployments must keep it behind authenticated, rate-limited ingress. Public
-unauthenticated use could otherwise turn `POST /persons` into a billable-call
-amplifier; application-level authentication remains outside the mandatory core.
+Bio policy, generation, parsing, validation, and composition all complete
+before the person/location database transaction begins. A failure leaves no
+partial person, observation, or last-known-location projection. Invalid output
+maps to 502, unavailability/timeout/rate limiting maps to 503, cancellation
+propagates, and there is no automatic provider or deterministic fallback.
+
+### Credentials, transport, storage, and containers
+
+- The core Compose stack uses an ignored local database-password file mounted
+  as a Compose secret; it is not placed in the resolved Compose environment.
+- Remote provider credentials, when that non-default adapter is explicitly
+  selected, are read from environment or config-tree secrets and sent in
+  provider authentication headers rather than request JSON. Invalid provider,
+  model, credential, timeout, or runtime combinations fail startup.
+- Provider clients use fixed HTTPS endpoints, do not follow redirects, enforce
+  bounded timeouts, and stop before buffering more than 262,144 response bytes.
+  Request/response diagnostic representations omit headers and bodies.
+- The application container runs as a dedicated non-root user with a read-only
+  root filesystem, a bounded `/tmp` tmpfs, and `no-new-privileges`. The database
+  container runs as the `postgres` user with `no-new-privileges`.
+- Compose publishes the application on IPv4 loopback only. The database is on
+  an internal network with no host port. Flyway owns the schema migrations, and
+  accepted location observations are append-only during normal operation.
+
+## Executable security checks
+
+`./scripts/verify.sh` is credential-free and explicitly removes live-provider
+configuration from its environment. In addition to the full Gradle build and
+HTTP/PostGIS smoke, it:
+
+- runs focused bio adapter, privacy-boundary, provider-contract, hostile-output,
+  timeout, and failure-atomicity tests;
+- confirms the application binds to loopback and the database has no host port;
+- checks the resolved Compose configuration and captured container logs for the
+  generated database password and fixed synthetic profile values; and
+- records `live_provider_calls=disabled` in
+  `build/verification/summary.txt`.
+
+Those value checks cover the generated secret and known smoke fixtures; they
+are not a general proof that arbitrary secrets or personal data can never be
+logged.
+
+The repository also configures GitHub Actions to run Trivy 0.72.0 against
+repository misconfiguration and built application/PostGIS images, failing on
+high or critical findings under the workflow's stated filters. That workflow is
+CI configuration, not evidence that a scan passed for an unpushed local
+revision.
 
 ## Third-party PII and model risk
 
 Sending names, precise locations, employment details, hobbies, identifiers, or
-linkable request metadata to a third-party model could enable profiling,
+linkable request metadata to a third-party model can enable profiling,
 re-identification, cross-request correlation, unintended retention, regulatory
 exposure, or disclosure through provider operations and abuse monitoring.
-Prompt injection is also not solved by text filtering alone; a model remains an
-untrusted nondeterministic dependency.
+Prompt filtering alone cannot make a model trusted.
 
-The implemented minimization boundary substantially reduces this risk but does
-not make a third-party provider risk-free. Broad categories can still reveal
-limited traits, and network/provider metadata still exists. Provider contracts,
-retention controls, residency, subprocessors, access controls, and incident
-response require separate organizational review before production use.
+The implemented allowlist reduces data sent to a provider, but broad categories
+and ordinary network/provider metadata can still reveal information. Provider
+retention, residency, subprocessors, training/product-improvement use, access
+controls, contractual terms, and incident response require organizational
+review before any production use.
 
-## Higher-security banking architecture
+## Known gaps in this core candidate
 
-For a high-security banking deployment, prefer deterministic local generation
-or an approved model hosted inside the bank's controlled boundary. If external
-inference is approved, place it behind a dedicated egress service that:
+The following controls are not implemented:
 
-- accepts only a versioned schema of coarse, non-identifying codes;
-- rejects all unknown fields and blocks every non-allowlisted destination;
+- production-wide reliability evidence for the remote model. Three independent
+  paid OpenAI fixed-corpus runs were completed without retries, top-ups, or
+  fallback and are not pooled. Revision `465c648` produced 299/300 valid and
+  failed the 1% Wilson gate after one request reached the prior 10-second
+  deadline. Revision `7e02d65dc2895e6e618365021053c96f78ec8efb` then passed
+  300/300 under the 15-second deadline, but its intentionally content-free
+  evidence cannot reclassify those outputs under the later, stricter
+  model-authored meta-language policy. Final-policy revision
+  `316be4ab57c424aae4fbb5a2ecc9b43e2fb612da` independently repeated the exact
+  12-by-25 protocol under the 15-second deadline and produced 300/300 valid
+  results and 298 distinct outputs, with a 0.8938% one-sided 95% Wilson upper
+  bound. All 300 responses were HTTP 200 and completed; p50/p95/max
+  application latency was 1.330/2.705/6.404 seconds. The final run reported
+  75,150 input and 14,595 output tokens and an estimated USD 0.162720 cost.
+  Across all paid evidence, 945 calls reported 236,485 input and 46,011 output
+  tokens, for an estimated USD 0.512551 rather than an actual billing claim.
+  Only the final-policy run gates its exact revision. The
+  [content-safe report](docs/evidence/live-ai/openai-316be4ab57c424aae4fbb5a2ecc9b43e2fb612da-12x25-passed.md)
+  records the fixed synthetic conditions. This evidence does not predict all
+  future provider or production behavior;
+- authentication, authorization, tenant isolation, or ownership checks;
+- application-level rate limiting, quotas, or abuse prevention;
+- TLS termination for the local HTTP API;
+- customer consent, retention, deletion, erasure, or restore workflows;
+- production secrets management, workload identity, or credential rotation;
+- tamper-evident audit logging, security monitoring, and incident response; and
+- native amd64 runtime verification of the Docker stack.
+
+The local Compose stack must not be treated as an internet-facing production
+deployment.
+
+## Higher-security banking architecture (proposed, not implemented)
+
+For a high-security banking deployment, prefer deterministic generation inside
+the bank boundary or a bank-controlled model. If external inference is approved,
+place it behind a dedicated egress service that:
+
+- accepts only a versioned schema of coarse non-identifying codes and rejects
+  unknown fields;
+- allowlists destinations and blocks all other egress;
 - uses workload identity and a managed secrets service with rotation;
-- enforces encryption in transit, strict timeouts, quotas, and circuit breaking;
-- records only privacy-reviewed metadata and tamper-evident audit events;
-- applies contractual zero-retention, regional-processing, and subprocessor
-  controls; and
+- enforces encrypted transport, strict timeouts, quotas, circuit breaking, and
+  authenticated callers;
+- records only privacy-reviewed metadata in tamper-evident audit events;
+- enforces approved retention, residency, subprocessor, and deletion terms; and
 - undergoes threat modelling, privacy impact assessment, red-team testing,
-  model/output monitoring, and incident-response exercises.
+  output monitoring, and incident-response exercises.
 
-Customer consent, purpose limitation, deletion/retention policy, access
-authorization, and legal approval remain human-owned controls. A model response
-must never authorize a transaction or alter a security decision.
+Customer consent, purpose limitation, authorization, retention/deletion policy,
+and legal approval remain human-owned controls. A model response must never
+authorize a transaction or change a security decision.

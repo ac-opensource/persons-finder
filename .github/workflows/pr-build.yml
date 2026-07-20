@@ -16,7 +16,7 @@ jobs:
   build:
     name: Gradle clean build
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
 
     steps:
       - name: Check out repository
@@ -31,5 +31,17 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
-      - name: Build and test
-        run: ./gradlew clean build --no-daemon --console=plain
+      - name: Verify application
+        run: ./scripts/verify.sh
+
+      - name: Publish verification output
+        if: always()
+        uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
+        with:
+          name: persons-finder-verification-${{ github.run_id }}
+          path: |
+            build/reports/tests/test
+            build/test-results/test
+            build/verification
+          if-no-files-found: warn
+          retention-days: 7

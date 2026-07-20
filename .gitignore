@@ -15,6 +15,7 @@ local.properties
 
 # Local agent journals, handoffs, secrets, transcripts, PII, logs, and scratch
 .agents/
+docs/evidence/live-ai/*.json
 
 # Log file
 *.log

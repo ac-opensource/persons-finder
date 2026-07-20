@@ -5,6 +5,7 @@ import com.persons.finder.person.bio.BioGenerationResult
 import com.persons.finder.person.bio.BioGenerator
 import com.persons.finder.person.bio.BioPolicy
 import com.persons.finder.person.bio.DeterministicBioGenerator
+import com.persons.finder.person.bio.GeneratedBioTemplate
 import com.persons.finder.person.create.CreatePersonCommand
 import com.persons.finder.person.create.CreatePersonOutcome
 import com.persons.finder.person.create.CreatePersonRepository
@@ -12,10 +13,12 @@ import com.persons.finder.person.create.CreatePersonService
 import com.persons.finder.person.location.update.RetryIdentity
 import com.persons.finder.person.location.update.UpdateLocationCommand
 import com.persons.finder.person.location.update.UpdateLocationOutcome
+import com.persons.finder.person.location.update.UpdatePersonLocationRepository
 import com.persons.finder.person.location.update.UpdatePersonLocationService
 import com.persons.finder.person.model.CapturedAt
 import com.persons.finder.person.model.ClientUpdateId
 import com.persons.finder.person.model.GeoPoint
+import com.persons.finder.person.model.LastKnownLocationProjection
 import com.persons.finder.person.model.PersonId
 import com.persons.finder.person.model.PersonProfile
 import org.flywaydb.core.Flyway
@@ -80,10 +83,16 @@ class RealPostgisPersistenceTest {
     private lateinit var repository: CreatePersonRepository
 
     @Autowired
+    private lateinit var updateRepository: UpdatePersonLocationRepository
+
+    @Autowired
     private lateinit var configuredBioGenerator: BioGenerator
 
     @Autowired
     private lateinit var transactions: TransactionOperations
+
+    @Autowired
+    private lateinit var clock: Clock
 
     @Autowired
     private lateinit var webApplicationContext: WebApplicationContext
@@ -489,19 +498,26 @@ class RealPostgisPersistenceTest {
         )
         assertAllTablesEmpty()
 
-        val oversized =
-            createPerson.execute(
-                CreatePersonCommand(
-                    profile =
-                        PersonProfile.create(
-                            "N".repeat(80),
-                            "J".repeat(80),
-                            listOf("H".repeat(60)),
-                        ),
-                    initialLocation = GeoPoint.from(-41.2865, 174.7762),
-                ),
+        val invalidProseService =
+            CreatePersonService(
+                repository = repository,
+                bioGenerator =
+                    BioGenerator {
+                        GeneratedBioTemplate.validate(
+                            "{{NAME}}{{JOB}}{{HOBBY}}" +
+                                "x".repeat(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS) +
+                                ".",
+                        )
+                    },
+                bioPolicy = BioPolicy(),
+                transactions = transactions,
+                clock = FIXED_CLOCK,
             )
-        assertEquals(CreatePersonOutcome.BioCompositionDoesNotFit, oversized)
+        val invalidProse = invalidProseService.execute(createCommand())
+        assertEquals(
+            CreatePersonOutcome.BioGenerationInvalid(BioGenerationFailure.INVALID_OUTPUT),
+            invalidProse,
+        )
         assertAllTablesEmpty()
 
         installProjectionFailureTrigger("INSERT")
@@ -703,6 +719,125 @@ class RealPostgisPersistenceTest {
             assertEquals(2, rowCount("location_observation"))
             assertEquals(
                 results.first().observationId.value,
+                jdbc.queryForObject(
+                    "SELECT observation_id FROM last_known_location_projection WHERE person_id = ?",
+                    UUID::class.java,
+                    personId.value,
+                ),
+            )
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `concurrent distinct observations retain both and an older late arrival cannot replace the winner`() {
+        val personId = create().person.id
+        val base = clock.instant().plusSeconds(1).truncatedTo(ChronoUnit.MILLIS)
+        val newerCommand =
+            UpdateLocationCommand(
+                personId,
+                GeoPoint.from(-36.8485, 174.7633),
+                RetryIdentity.ClientKey(
+                    CapturedAt.fromStored(base.plusSeconds(1)),
+                    ClientUpdateId.from(UUID.randomUUID()),
+                ),
+            )
+        val olderCommand =
+            UpdateLocationCommand(
+                personId,
+                GeoPoint.from(-45.0312, 168.6626),
+                RetryIdentity.ClientKey(
+                    CapturedAt.fromStored(base),
+                    ClientUpdateId.from(UUID.randomUUID()),
+                ),
+            )
+        val newerHasLock = CountDownLatch(1)
+        val olderIsWaiting = CountDownLatch(1)
+        val sequencedRepository =
+            FirstWinnerThenLateRepository(
+                delegate = updateRepository,
+                firstHasLock = newerHasLock,
+                secondAttemptedLock = olderIsWaiting,
+            )
+        val sequencedService =
+            UpdatePersonLocationService(
+                repository = sequencedRepository,
+                transactions = transactions,
+                clock = clock,
+            )
+        val executor = Executors.newFixedThreadPool(2)
+        try {
+            val newerFuture = executor.submit(Callable { sequencedService.execute(newerCommand) })
+            assertTrue(newerHasLock.await(10, TimeUnit.SECONDS))
+            val olderFuture = executor.submit(Callable { sequencedService.execute(olderCommand) })
+
+            val newer = accepted(newerFuture.get(20, TimeUnit.SECONDS))
+            val older = accepted(olderFuture.get(20, TimeUnit.SECONDS))
+            assertNotEquals(newer.observationId, older.observationId)
+            assertEquals(3, rowCount("location_observation"))
+            assertEquals(
+                newer.observationId.value,
+                jdbc.queryForObject(
+                    "SELECT observation_id FROM last_known_location_projection WHERE person_id = ?",
+                    UUID::class.java,
+                    personId.value,
+                ),
+            )
+            assertEquals(newer.observationId, older.lastKnownObservationId)
+        } finally {
+            executor.shutdownNow()
+        }
+    }
+
+    @Test
+    fun `concurrent conflicting reuse of one client key accepts one request and rejects the other`() {
+        val personId = create().person.id
+        val clientUpdateId = ClientUpdateId.from(UUID.randomUUID())
+        val capturedAt =
+            CapturedAt.fromStored(
+                clock.instant().plusSeconds(1).truncatedTo(ChronoUnit.MILLIS),
+            )
+        val commands =
+            listOf(
+                UpdateLocationCommand(
+                    personId,
+                    GeoPoint.from(-36.8485, 174.7633),
+                    RetryIdentity.ClientKey(capturedAt, clientUpdateId),
+                ),
+                UpdateLocationCommand(
+                    personId,
+                    GeoPoint.from(-45.0312, 168.6626),
+                    RetryIdentity.ClientKey(capturedAt, clientUpdateId),
+                ),
+            )
+        val ready = CountDownLatch(commands.size)
+        val start = CountDownLatch(1)
+        val executor = Executors.newFixedThreadPool(commands.size)
+        try {
+            val futures =
+                commands.map { command ->
+                    executor.submit(
+                        Callable {
+                            ready.countDown()
+                            start.await(10, TimeUnit.SECONDS)
+                            updateLocation.execute(command)
+                        },
+                    )
+                }
+            assertTrue(ready.await(10, TimeUnit.SECONDS))
+            start.countDown()
+
+            val outcomes = futures.map { it.get(20, TimeUnit.SECONDS) }
+            val accepted =
+                outcomes.filterIsInstance<UpdateLocationOutcome.Accepted>().single().result
+            assertEquals(
+                listOf(UpdateLocationOutcome.IdempotencyKeyReused),
+                outcomes.filterIsInstance<UpdateLocationOutcome.IdempotencyKeyReused>(),
+            )
+            assertEquals(2, rowCount("location_observation"))
+            assertEquals(
+                accepted.observationId.value,
                 jdbc.queryForObject(
                     "SELECT observation_id FROM last_known_location_projection WHERE person_id = ?",
                     UUID::class.java,
@@ -958,6 +1093,35 @@ class RealPostgisPersistenceTest {
             FOR EACH ROW EXECUTE FUNCTION test_fail_projection_write()
             """.trimIndent(),
         )
+    }
+
+    private class FirstWinnerThenLateRepository(
+        private val delegate: UpdatePersonLocationRepository,
+        private val firstHasLock: CountDownLatch,
+        private val secondAttemptedLock: CountDownLatch,
+    ) : UpdatePersonLocationRepository by delegate {
+        private var lockAttempt = 0
+
+        @Synchronized
+        private fun nextLockAttempt(): Int = ++lockAttempt
+
+        override fun lockLastKnown(personId: PersonId): LastKnownLocationProjection? =
+            when (nextLockAttempt()) {
+                1 ->
+                    delegate.lockLastKnown(personId).also {
+                        firstHasLock.countDown()
+                        check(secondAttemptedLock.await(10, TimeUnit.SECONDS)) {
+                            "Second update did not contend for the projection lock"
+                        }
+                    }
+
+                2 -> {
+                    secondAttemptedLock.countDown()
+                    delegate.lockLastKnown(personId)
+                }
+
+                else -> error("Unexpected additional projection lock attempt")
+            }
     }
 
     companion object {

@@ -31,7 +31,7 @@ class GeneratedBioContractTest {
         }
 
     @TestFactory
-    fun `catalog templates are independently normalized and valid`(): List<DynamicTest> =
+    fun `catalog templates are independently normalized and fit the prose budget`(): List<DynamicTest> =
         BioTemplateId.entries.map { templateId ->
             DynamicTest.dynamicTest(templateId.wireValue) {
                 val template = GeneratedBioTemplate.fromCatalog(templateId)
@@ -46,26 +46,60 @@ class GeneratedBioContractTest {
                     TemplateToken.entries.fold(template.value) { value, token ->
                         value.replace(token.literal, "")
                     }
-                assertEquals(
-                    BioPolicy.MINIMUM_BIO_TEMPLATE_OVERHEAD_CODE_POINTS,
-                    fixedText.codePointCount(0, fixedText.length),
+                assertTrue(
+                    fixedText.codePointCount(0, fixedText.length) <=
+                        BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS,
                 )
             }
         }
 
     @Test
-    fun `unsafe region multi-sentence wrapper and policy-invalid templates are rejected`() {
+    fun `unsafe region excessive sentences wrapper and policy-invalid templates are rejected`() {
         listOf(
             VALID_TEMPLATE.replace("who enjoys", "from South Island who enjoys"),
-            VALID_TEMPLATE.dropLast(1) + ". Another sentence.",
+            VALID_TEMPLATE.dropLast(1) + ". Two. Three. Four.",
             VALID_TEMPLATE.replace("very quirky", "I am hacked; very quirky"),
             VALID_TEMPLATE.replace("very quirky", "the following is the system prompt; quirky"),
+            VALID_TEMPLATE.replace("very quirky", "quirky and follows every prompt"),
+            VALID_TEMPLATE.replace("very quirky", "quirky and discusses prompts"),
+            VALID_TEMPLATE.replace("very quirky", "quirky with one instruction"),
+            VALID_TEMPLATE.replace("very quirky", "quirky with clear instructions"),
             VALID_TEMPLATE.replace("very quirky", "\\u{110000} quirky"),
             VALID_TEMPLATE.replace("very quirky", "quirky\n"),
             "",
-            " ".repeat(241),
             "\uD800",
         ).forEach(::assertInvalidTemplate)
+    }
+
+    @Test
+    fun `one to three sentences and the model-authored literal budget are enforced`() {
+        listOf(
+            "{{NAME}} is a quirky {{JOB}} who enjoys {{HOBBY}}.",
+            "{{NAME}} is a quirky {{JOB}}. {{HOBBY}} keeps ideas moving!",
+            "{{NAME}} is a quirky {{JOB}}. {{HOBBY}} sparks ideas! Always curious?",
+            "{{NAME}} promptly turns {{HOBBY}} into a quirky adventure as a {{JOB}}.",
+            "{{NAME}} makes instructional {{HOBBY}} projects as a quirky {{JOB}}.",
+        ).forEach { candidate ->
+            assertTrue(
+                GeneratedBioTemplate.validate(candidate) is BioGenerationResult.Template,
+                candidate,
+            )
+        }
+        assertInvalidTemplate(
+            "{{NAME}} is a {{JOB}}. {{HOBBY}} sparks ideas! Always curious? One more.",
+        )
+        assertInvalidTemplate(
+            "{{NAME}} is a {{JOB}}. A. B. C. {{HOBBY}} rocks.",
+        )
+
+        val exactLiteralBudget =
+            templateWithLiteralCodePoints(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS)
+        assertTrue(
+            GeneratedBioTemplate.validate(exactLiteralBudget) is BioGenerationResult.Template,
+        )
+        assertInvalidTemplate(
+            templateWithLiteralCodePoints(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS + 1),
+        )
     }
 
     @Test
@@ -151,17 +185,28 @@ class GeneratedBioContractTest {
     }
 
     @Test
-    fun `final 240 limit is Unicode-code-point based and grounding remains exact`() {
-        val template = GeneratedBioTemplate.fromCatalog(BioTemplateId.QUIRKY_SIDE_QUEST)
+    fun `final limit is Unicode-code-point based and grounding remains exact`() {
+        val template =
+            when (
+                val result =
+                    GeneratedBioTemplate.validate(
+                        templateWithLiteralCodePoints(
+                            BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS,
+                        ),
+                    )
+            ) {
+                is BioGenerationResult.Template -> result.value
+                is BioGenerationResult.Failure -> error("Fixture must be valid")
+            }
         val profile =
             PersonProfile.create(
                 "🧭".repeat(80),
                 "J".repeat(80),
-                listOf("H".repeat(46)),
+                listOf("H".repeat(60)),
             )
         val exact = GeneratedBio.compose(template, profile, profile.hobbies.single()).value
 
-        assertEquals(240, exact.codePointCount(0, exact.length))
+        assertEquals(BioPolicy.FINAL_BIO_MAX_CODE_POINTS, exact.codePointCount(0, exact.length))
         assertTrue(exact.contains(profile.name))
         assertTrue(exact.contains(profile.jobTitle))
         assertTrue(exact.contains(profile.hobbies.single()))
@@ -171,7 +216,7 @@ class GeneratedBioContractTest {
                 BioGrounding(
                     profile.name,
                     profile.jobTitle,
-                    "H".repeat(47),
+                    "H".repeat(61),
                 ),
             )
         }
@@ -198,6 +243,11 @@ class GeneratedBioContractTest {
                 reason == BioGenerationFailure.POLICY_REJECTED,
             "$candidate -> $reason",
         )
+    }
+
+    private fun templateWithLiteralCodePoints(literalCodePoints: Int): String {
+        require(literalCodePoints > 0)
+        return "{{NAME}}{{JOB}}{{HOBBY}}" + "x".repeat(literalCodePoints - 1) + "."
     }
 
     private companion object {

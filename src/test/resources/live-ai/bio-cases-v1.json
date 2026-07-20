@@ -1,0 +1,78 @@
+{
+  "corpus_id": "bio-cases-v1",
+  "schema_version": 1,
+  "cases": [
+    {
+      "id": "case-001",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "technology_engineering",
+      "interests": ["technology_making"]
+    },
+    {
+      "id": "case-002",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "healthcare",
+      "interests": ["sports_fitness"]
+    },
+    {
+      "id": "case-003",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "education_research",
+      "interests": ["reading_writing"]
+    },
+    {
+      "id": "case-004",
+      "slices": ["job-coverage", "multi-interest"],
+      "job_category": "creative_media",
+      "interests": ["arts_crafts", "music"]
+    },
+    {
+      "id": "case-005",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "business_operations",
+      "interests": ["games_puzzles"]
+    },
+    {
+      "id": "case-006",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "finance_legal",
+      "interests": ["food_drink"]
+    },
+    {
+      "id": "case-007",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "sales_service",
+      "interests": ["travel"]
+    },
+    {
+      "id": "case-008",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "trades_manufacturing",
+      "interests": ["gardening"]
+    },
+    {
+      "id": "case-009",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "hospitality_retail",
+      "interests": ["food_drink"]
+    },
+    {
+      "id": "case-010",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "public_community_service",
+      "interests": ["outdoors_nature"]
+    },
+    {
+      "id": "case-011",
+      "slices": ["job-coverage", "single-interest"],
+      "job_category": "student",
+      "interests": ["reading_writing"]
+    },
+    {
+      "id": "case-012",
+      "slices": ["job-coverage", "single-interest", "both-other"],
+      "job_category": "other",
+      "interests": ["other"]
+    }
+  ]
+}

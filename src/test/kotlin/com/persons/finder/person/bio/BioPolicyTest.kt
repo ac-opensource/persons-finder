@@ -131,16 +131,20 @@ class BioPolicyTest {
     }
 
     @Test
-    fun `source feasibility uses the approved minimum overhead in Unicode code points`() {
+    fun `maximum source grounding and model-authored prose fit the final Unicode limit`() {
         val exactProfile =
             PersonProfile.create(
                 "🧭".repeat(80),
                 "J".repeat(80),
-                listOf("H".repeat(46)),
+                listOf("H".repeat(60)),
             )
         val prepared = policy.prepare(exactProfile)
         val generated =
-            DeterministicBioGenerator().generate(prepared.request) as BioGenerationResult.Template
+            GeneratedBioTemplate.validate(
+                "{{NAME}}{{JOB}}{{HOBBY}}" +
+                    "x".repeat(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS - 1) +
+                    ".",
+            ) as BioGenerationResult.Template
 
         assertEquals(
             BioPolicy.FINAL_BIO_MAX_CODE_POINTS,
@@ -149,16 +153,7 @@ class BioPolicyTest {
                 .value
                 .let { it.codePointCount(0, it.length) },
         )
-
-        assertThrows(BioCompositionDoesNotFitException::class.java) {
-            policy.prepare(
-                PersonProfile.create(
-                    "🧭".repeat(80),
-                    "J".repeat(80),
-                    listOf("H".repeat(47)),
-                ),
-            )
-        }
+        assertEquals(220, BioPolicy.MAX_SELECTED_SOURCE_CODE_POINTS)
     }
 
     companion object {

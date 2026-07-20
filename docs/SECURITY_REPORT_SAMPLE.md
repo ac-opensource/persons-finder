@@ -15,7 +15,7 @@
 | Code scope | Current working tree; no release or commit hash asserted |
 | Primary concern | Prompt injection, PII egress, unsafe model output, and failure atomicity |
 | Verification command | `./gradlew test --console=plain` |
-| Recorded result | 213 tests: 210 passed, 0 failed, 3 intentionally skipped live-provider evaluations |
+| Recorded result | 320 tests: 317 passed, 0 failed, 3 intentionally skipped opt-in live-provider evaluations |
 
 ## Executive summary
 
@@ -24,13 +24,13 @@ sentence. Its hard security boundary is structural:
 
 1. raw profile values map locally to closed job and interest codes;
 2. only those codes and fixed deployment constants can enter the model request;
-3. a provider can return only one closed application-owned template ID;
-4. the application resolves and independently validates a three-placeholder template;
+3. a provider authors only one structured prose template;
+4. the application independently validates its placeholders, content, sentence count, and bounds;
 5. trusted local code inserts validated source values once as opaque segments; and
 6. generation, composition, and validation finish before persistence begins.
 
 The exact challenge attack, normalized and zero-width-joiner variants, bidi
-controls, free-form provider prose, ambiguous JSON, oversized provider
+controls, hostile provider prose, ambiguous JSON, oversized provider
 responses, and failure-with-partial-write scenarios are covered by automated
 checks. The remaining material deployment prerequisite is to keep opt-in remote
 generation behind authenticated, rate-limited ingress.
@@ -45,12 +45,14 @@ Included:
 - provider request and structured-output contracts;
 - provider response-size, timeout, redirect, and diagnostic boundaries;
 - local bio rendering and final-output invariants;
-- error sanitization and persistence atomicity; and
-- the real HTTP/PostGIS rejection path for the challenge attack.
+- error sanitization and persistence atomicity;
+- the real HTTP/PostGIS rejection path for the challenge attack; and
+- sanitized paid OpenAI compatibility, calibration, and fixed-corpus evidence.
 
 Excluded:
 
-- a live-provider rerun of the current closed-template-ID contract;
+- production-wide reliability claims beyond the recorded fixed synthetic corpus;
+- provider billing-export evidence or an actual-charge claim;
 - internet-facing authentication, authorization, and per-caller quotas;
 - third-party provider contractual, retention, residency, and subprocessor
   review;
@@ -80,11 +82,12 @@ location, identifier, credential, or arbitrary customer text. Exact local
 aliases map input to closed `SafeJobCode` and `SafeInterestCode` values.
 Unmatched or sensitive values degrade to `other`.
 
-The remote result is only a closed `BioTemplateId`, resolved to an
-application-owned template. The application validates exactly one each of
-`{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, parses literal/token segments, and
-inserts validated source strings once as opaque local data. They cannot enter
-the provider request and are never rescanned after insertion.
+The remote result is one model-authored `bio_template` string. The application
+validates exactly one each of `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, one to
+three safe sentences, printable ASCII, and the 512-code-point literal budget,
+then parses literal/token segments and inserts validated source strings once as
+opaque local data. They cannot enter the provider request and are never
+rescanned after insertion.
 
 Evidence:
 
@@ -110,16 +113,21 @@ Evidence:
 - [`BioPolicyTest.kt`](../src/test/kotlin/com/persons/finder/person/bio/BioPolicyTest.kt)
 - [`PersonModelTest.kt`](../src/test/kotlin/com/persons/finder/person/model/PersonModelTest.kt)
 
-### SR-003: Provider-authored prose or ambiguous JSON could cross the boundary
+### SR-003: Unsafe provider-authored prose or ambiguous JSON could cross the boundary
 
 - Initial severity: High
-- Status: Mitigated by closed remote output and independent validation
+- Status: Mitigated by strict structured output and independent validation
 
 Remote providers receive a strict JSON schema whose only property is
-`template_id`, selected from the application-owned enum. The application caps
-the extracted output, enables duplicate-key detection, and rejects malformed
-or trailing JSON, extra fields, non-string values, unknown IDs, Unicode-spoofed
-IDs, and legacy free-form templates.
+`bio_template`. The application caps the extracted output, enables duplicate-key
+detection, and rejects malformed or trailing JSON, extra fields, non-string
+values, missing or mutated placeholders, more than three sentences, excessive
+literal or final length, policy violations, and unsafe Unicode. Model-authored
+literal prose also rejects the standalone words `prompt`, `prompts`,
+`instruction`, and `instructions`; word boundaries preserve benign words such
+as `promptly` and `instructional`. This check runs before trusted one-pass
+composition, so opaque validated local source containing those words is not
+reinterpreted.
 
 Evidence:
 
@@ -133,7 +141,7 @@ Evidence:
 - Status: Remediated
 
 The HTTP transport uses a back-pressured body subscriber and cancels the
-subscription before buffering more than 65,536 response bytes. Provider clients
+subscription before buffering more than 262,144 response bytes. Provider clients
 classify that response as invalid output without exposing its contents.
 
 Evidence:
@@ -163,30 +171,54 @@ report does not claim that control is implemented.
 | NFKC/full-width attack spelling | Rejected before generation | Bio policy tests |
 | Attack term split with ZWJ or ZWNJ | Rejected before generation | Bio policy and privacy-boundary tests |
 | Bidi override, isolate, or invisible format control | Sanitized 400 before service invocation | Domain and controller tests |
-| Free-form or legacy provider prose | `INVALID_OUTPUT` | Remote adapter tests |
-| Duplicate, extra, trailing, non-string, or unknown provider output | `INVALID_OUTPUT` | Remote adapter tests |
+| Unsafe or structurally invalid provider prose | `INVALID_OUTPUT` or `POLICY_REJECTED` | Remote adapter tests |
+| Standalone model-authored `prompt(s)` or `instruction(s)` | `POLICY_REJECTED`; `promptly` and `instructional` remain valid | Template and remote-adapter policy tests |
+| Duplicate, extra, trailing, or non-string provider output | `INVALID_OUTPUT` | Remote adapter tests |
 | Oversized provider response | Subscription cancelled and failure normalized | HTTP transport and provider-client tests |
 | Missing, duplicate, mutated, escaped, wrapped, or unknown placeholder | `BIO_GENERATION_INVALID`; no writes | Application template and transaction tests |
-| Placeholder-looking or regex-significant source | Inserted once as opaque data and revalidated | Trusted-composer tests |
-| Any closed template/job/interest combination | One safe grounded sentence of at most 240 Unicode code points | Exhaustive catalog, mapping, composer, and bounds tests |
+| Placeholder-looking, sentence-punctuated, or regex-significant source | Inserted once as opaque data; exact grounding and the final bound are checked without reparsing source punctuation | Trusted-composer tests |
+| Any validated prose/job/interest combination | A one-to-three-sentence model-authored template and a grounded bio of at most 732 Unicode code points | Prose-property, mapping, composer, and bounds tests |
 | Bio policy, provider, parsing, or rendering failure | No person, observation, or projection write | Application and real PostGIS tests |
 
 ## Residual risks and next actions
 
-1. Run all gated live-provider evaluations for the current closed-ID schema
-   only after the opt-in, approved credentials/models, disabled provider content
-   logging and telemetry, and complete-envelope prerequisites are confirmed.
-2. Keep remote mode on private networking until authenticated, rate-limited
+1. Retain the live-provider gates for explicit opt-in, approved
+   credentials/models, provider-specific synthetic retention/data-use approval,
+   disabled automatic content telemetry, and application-owned request
+   inspection. The approval accepts provider data use only for the fixed
+   synthetic fixtures and versioned corpus; it neither claims logging is
+   disabled nor authorizes customer/production data.
+2. Retain all three independent 300-call `gpt-5.6-luna` outcomes without
+   pooling them. Revision `465c648` produced 299/300 valid and failed the 1%
+   gate after one request reached the prior 10-second deadline. Revision
+   `7e02d65dc2895e6e618365021053c96f78ec8efb` passed 300/300 after the deadline
+   changed to 15 seconds, but raw prose was intentionally absent, so that run
+   cannot be reclassified under the later stricter output policy. Final-policy
+   revision `316be4ab57c424aae4fbb5a2ecc9b43e2fb612da` independently repeated the
+   exact 12-by-25 protocol under the 15-second deadline and produced 300/300
+   valid and 298 distinct results from exactly 300 sends, all HTTP 200 and
+   completed, with zero failure, policy rejection, retry, top-up, fallback,
+   boundary violation, or harness error. Its one-sided 95% Wilson upper failure
+   bound was 0.008937872175128179; p50/p95/max application latency was
+   1.329511/2.704556/6.404460 seconds and transport maximum was 6,402
+   milliseconds. It reported 75,150 input and 14,595 output tokens and maxima
+   of 64 output tokens, 196 authored code points, 416 grounded code points, and
+   two sentences. Its USD 0.162720 cost and the USD 0.512551 total across all
+   945 paid-evidence calls are estimates; actual billing remains unknown. Only
+   this final-policy run gates its exact revision. Preserve the
+   [content-safe report](evidence/live-ai/openai-316be4ab57c424aae4fbb5a2ecc9b43e2fb612da-12x25-passed.md)
+   and its fixed-corpus caveat.
+3. Keep remote mode on private networking until authenticated, rate-limited
    ingress and cost budgets are implemented and tested.
-3. Complete provider privacy, retention, residency, subprocessor, and incident
+4. Complete provider privacy, retention, residency, subprocessor, and incident
    response review before production use.
-4. Perform independent infrastructure and abuse-case testing before treating
+5. Perform independent infrastructure and abuse-case testing before treating
    this sample as a production security assessment.
 
 ## Conclusion
 
 Within the assessed bio-generation path, the primary controls are data
-minimization, closed remote output, strict application validation, one-pass
+minimization, strict structured remote output, deterministic validation, one-pass
 local composition, and transactional persistence—not trust in model
 instructions or a claim that a blacklist solves prompt injection. Source
 detection is intentionally narrow and can remain probabilistic outside the

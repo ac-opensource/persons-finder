@@ -5,43 +5,69 @@ import java.text.Normalizer
 import java.util.Locale
 
 /**
- * Application-owned validated template. Provider responses never construct
- * this type directly: a remote adapter can only select a closed catalog ID,
- * which is resolved and revalidated inside the application boundary.
+ * Application-owned validated prose template. A remote model may author the
+ * candidate text, but only this deterministic validator can construct the type.
  */
 @JvmInline
 value class GeneratedBioTemplate private constructor(val value: String) {
     companion object {
-        fun validate(candidate: String): BioGenerationResult {
+        fun validate(candidate: String): BioGenerationResult =
+            validateWithDiagnostic(candidate).result
+
+        internal fun validateWithDiagnostic(
+            candidate: String,
+        ): DiagnosedBioTemplateValidation {
             val normalized =
                 if (candidate.isWellFormedUtf16()) {
                     Normalizer.normalize(candidate.trimUnicodeWhitespace(), Normalizer.Form.NFC)
                 } else {
-                    return BioGenerationResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
+                    return DiagnosedBioTemplateValidation.rejected(
+                        GeneratedBioTemplateRejectionReason.MALFORMED_UNICODE,
+                    )
                 }
-            val failure =
+            val rejection =
                 when {
-                    normalized.isEmpty() -> BioGenerationFailure.INVALID_OUTPUT
+                    normalized.isEmpty() -> GeneratedBioTemplateRejectionReason.EMPTY
                     normalized.codePointCount(0, normalized.length) > MAX_TEMPLATE_CODE_POINTS ->
-                        BioGenerationFailure.INVALID_OUTPUT
+                        GeneratedBioTemplateRejectionReason.TOTAL_CODE_POINT_LIMIT
+
                     normalized.codePoints().anyMatch(::isForbiddenTemplateCodePoint) ->
-                        BioGenerationFailure.INVALID_OUTPUT
-                    !TEMPLATE_CHARACTERS.matches(normalized) -> BioGenerationFailure.INVALID_OUTPUT
+                        GeneratedBioTemplateRejectionReason.FORBIDDEN_CODE_POINT
+
+                    !TEMPLATE_CHARACTERS.matches(normalized) ->
+                        GeneratedBioTemplateRejectionReason.CHARACTER_POLICY
+
                     REQUIRED_TOKENS.any { token -> normalized.literalCount(token) != 1 } ->
-                        BioGenerationFailure.INVALID_OUTPUT
-                    hasUnknownOrMutatedPlaceholder(normalized) -> BioGenerationFailure.INVALID_OUTPUT
-                    hasQuotedOrMarkupWrappedPlaceholder(normalized) -> BioGenerationFailure.INVALID_OUTPUT
+                        GeneratedBioTemplateRejectionReason.PLACEHOLDER_CARDINALITY
+
+                    hasUnknownOrMutatedPlaceholder(normalized) ->
+                        GeneratedBioTemplateRejectionReason.UNKNOWN_OR_MUTATED_PLACEHOLDER
+
+                    hasQuotedOrMarkupWrappedPlaceholder(normalized) ->
+                        GeneratedBioTemplateRejectionReason.WRAPPED_PLACEHOLDER
+
                     DISALLOWED_REGION_TERMS.any { normalized.contains(it, ignoreCase = true) } ->
-                        BioGenerationFailure.POLICY_REJECTED
+                        GeneratedBioTemplateRejectionReason.FORBIDDEN_REGION
+
                     violatesGeneratedBioContentPolicy(normalized) ->
-                        BioGenerationFailure.POLICY_REJECTED
-                    !normalized.isOneSafeSentence() -> BioGenerationFailure.INVALID_OUTPUT
+                        GeneratedBioTemplateRejectionReason.CONTENT_POLICY
+
+                    normalized.templateLiteralCodePointCount() >
+                        BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS ->
+                        GeneratedBioTemplateRejectionReason.LITERAL_CODE_POINT_LIMIT
+
+                    !normalized.hasSafeSentenceCount() ->
+                        GeneratedBioTemplateRejectionReason.SENTENCE_COUNT
+
                     else -> null
                 }
-            return if (failure == null) {
-                BioGenerationResult.Template(GeneratedBioTemplate(normalized))
+            return if (rejection == null) {
+                DiagnosedBioTemplateValidation(
+                    result = BioGenerationResult.Template(GeneratedBioTemplate(normalized)),
+                    rejectionReason = null,
+                )
             } else {
-                BioGenerationResult.Failure(failure)
+                DiagnosedBioTemplateValidation.rejected(rejection)
             }
         }
 
@@ -65,6 +91,83 @@ value class GeneratedBioTemplate private constructor(val value: String) {
         }
     }
 }
+
+internal data class DiagnosedBioTemplateValidation(
+    val result: BioGenerationResult,
+    val rejectionReason: GeneratedBioTemplateRejectionReason?,
+) {
+    companion object {
+        fun rejected(
+            reason: GeneratedBioTemplateRejectionReason,
+        ): DiagnosedBioTemplateValidation =
+            DiagnosedBioTemplateValidation(
+                result = BioGenerationResult.Failure(reason.failure),
+                rejectionReason = reason,
+            )
+    }
+}
+
+internal enum class GeneratedBioTemplateRejectionReason(
+    val wireValue: String,
+    val failure: BioGenerationFailure = BioGenerationFailure.INVALID_OUTPUT,
+) {
+    MALFORMED_UNICODE("malformed_unicode"),
+    EMPTY("empty"),
+    TOTAL_CODE_POINT_LIMIT("total_code_point_limit"),
+    FORBIDDEN_CODE_POINT("forbidden_code_point"),
+    CHARACTER_POLICY("character_policy"),
+    PLACEHOLDER_CARDINALITY("placeholder_cardinality"),
+    UNKNOWN_OR_MUTATED_PLACEHOLDER("unknown_or_mutated_placeholder"),
+    WRAPPED_PLACEHOLDER("wrapped_placeholder"),
+    FORBIDDEN_REGION("forbidden_region", BioGenerationFailure.POLICY_REJECTED),
+    CONTENT_POLICY("content_policy", BioGenerationFailure.POLICY_REJECTED),
+    LITERAL_CODE_POINT_LIMIT("literal_code_point_limit"),
+    SENTENCE_COUNT("sentence_count"),
+}
+
+internal data class ObservedBioTemplateMetrics(
+    val wellFormedUnicode: Boolean,
+    val codePoints: Int?,
+    val modelAuthoredCodePoints: Int?,
+    val namePlaceholderCount: Int,
+    val jobPlaceholderCount: Int,
+    val hobbyPlaceholderCount: Int,
+    val sentenceCount: Int?,
+    val printableAscii: Boolean?,
+)
+
+internal fun observeBioTemplate(candidate: String): ObservedBioTemplateMetrics {
+    if (!candidate.isWellFormedUtf16()) {
+        return ObservedBioTemplateMetrics(
+            wellFormedUnicode = false,
+            codePoints = null,
+            modelAuthoredCodePoints = null,
+            namePlaceholderCount = candidate.literalCount(TemplateToken.NAME.literal),
+            jobPlaceholderCount = candidate.literalCount(TemplateToken.JOB.literal),
+            hobbyPlaceholderCount = candidate.literalCount(TemplateToken.HOBBY.literal),
+            sentenceCount = null,
+            printableAscii = null,
+        )
+    }
+    val normalized =
+        Normalizer.normalize(candidate.trimUnicodeWhitespace(), Normalizer.Form.NFC)
+    return ObservedBioTemplateMetrics(
+        wellFormedUnicode = true,
+        codePoints = normalized.codePointCount(0, normalized.length),
+        modelAuthoredCodePoints = normalized.templateLiteralCodePointCount(),
+        namePlaceholderCount = normalized.literalCount(TemplateToken.NAME.literal),
+        jobPlaceholderCount = normalized.literalCount(TemplateToken.JOB.literal),
+        hobbyPlaceholderCount = normalized.literalCount(TemplateToken.HOBBY.literal),
+        sentenceCount = normalized.observedSentenceCount(),
+        printableAscii = normalized.codePoints().allMatch { it in PRINTABLE_ASCII_CODE_POINTS },
+    )
+}
+
+internal fun GeneratedBioTemplate.modelAuthoredCodePointCount(): Int =
+    value.templateLiteralCodePointCount()
+
+internal fun GeneratedBioTemplate.sentenceCount(): Int =
+    recognizedInternalSentenceBoundaryCount(value.dropLast(1)) + 1
 
 /**
  * Final write-boundary type. Construction parses template tokens, appends
@@ -197,7 +300,7 @@ private fun hasQuotedOrMarkupWrappedPlaceholder(value: String): Boolean =
         }
     }
 
-private fun String.isOneSafeSentence(): Boolean {
+private fun String.hasSafeSentenceCount(): Boolean {
     if (isBlank()) {
         return false
     }
@@ -205,23 +308,36 @@ private fun String.isOneSafeSentence(): Boolean {
     if (terminal !in SENTENCE_TERMINATORS) {
         return false
     }
-    return !hasUnrecognizedInternalSentenceBoundary(dropLast(1))
+    val internalSentenceBoundaries = recognizedInternalSentenceBoundaryCount(dropLast(1))
+    return internalSentenceBoundaries + 1 <= MAX_BIO_SENTENCES
 }
 
-private fun hasUnrecognizedInternalSentenceBoundary(value: String): Boolean =
-    SENTENCE_BOUNDARY_WITH_CONTINUATION.findAll(value).any { boundary ->
-        if (boundary.groupValues[1] != ".") {
-            true
-        } else {
-            val precedingWord =
-                PRECEDING_WORD
-                    .find(value.substring(0, boundary.range.first))
-                    ?.value
-                    ?.lowercase(Locale.ROOT)
-            precedingWord == null ||
-                (precedingWord.length > 1 && precedingWord !in NON_TERMINAL_PERIOD_WORDS)
-        }
+private fun String.observedSentenceCount(): Int? {
+    val terminal = lastOrNull() ?: return null
+    if (terminal !in SENTENCE_TERMINATORS) {
+        return null
     }
+    return recognizedInternalSentenceBoundaryCount(dropLast(1)) + 1
+}
+
+private fun recognizedInternalSentenceBoundaryCount(value: String): Int =
+    SENTENCE_BOUNDARY_WITH_CONTINUATION.findAll(value).count { boundary ->
+        boundary.groupValues[1] != "." || boundary.isTerminalPeriod(value)
+    }
+
+private fun MatchResult.isTerminalPeriod(value: String): Boolean {
+    val precedingWord =
+        PRECEDING_WORD
+            .find(value.substring(0, range.first))
+            ?.value
+            ?.lowercase(Locale.ROOT)
+    return precedingWord == null || precedingWord !in NON_TERMINAL_PERIOD_WORDS
+}
+
+private fun String.templateLiteralCodePointCount(): Int =
+    REQUIRED_TOKENS
+        .fold(this) { current, token -> current.replace(token, "") }
+        .let { literal -> literal.codePointCount(0, literal.length) }
 
 private fun violatesGeneratedBioContentPolicy(value: String): Boolean =
     violatesBioContentPolicy(value) ||
@@ -296,8 +412,7 @@ private val DISALLOWED_REGION_TERMS = listOf("North Island", "South Island")
 private val FORBIDDEN_GENERATED_PATTERNS =
     listOf(
         Regex("""(?i)\bi\s+am\s+hacked\b"""),
-        Regex("""(?i)\b(?:system|developer)\s+prompt\b"""),
-        Regex("""(?i)\b(?:here|following)\s+(?:is|are)\s+(?:the\s+)?(?:prompt|instructions?)\b"""),
+        Regex("""(?i)\b(?:prompts?|instructions?)\b"""),
     )
 private val SENTENCE_BOUNDARY_WITH_CONTINUATION =
     Regex("""([.!?])(?:["')\]]*)\s*(?=\S)""")
@@ -305,6 +420,9 @@ private val PRECEDING_WORD = Regex("""([\p{L}]+(?:\.[\p{L}]+)*)$""")
 private val NON_TERMINAL_PERIOD_WORDS =
     setOf("dr", "e.g", "i.e", "jr", "mr", "mrs", "ms", "prof", "sr", "st", "vs")
 private val PRINTABLE_ASCII_CODE_POINTS = 0x20..0x7E
-private const val MAX_TEMPLATE_CODE_POINTS = 240
+private val MAX_TEMPLATE_CODE_POINTS =
+    BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS +
+        REQUIRED_TOKENS.sumOf { token -> token.codePointCount(0, token.length) }
+private const val MAX_BIO_SENTENCES = 3
 private const val ZERO_WIDTH_NON_JOINER = 0x200C
 private const val ZERO_WIDTH_JOINER = 0x200D

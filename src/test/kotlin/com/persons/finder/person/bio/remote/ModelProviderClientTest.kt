@@ -23,10 +23,10 @@ class ModelProviderClientTest {
     private val objectMapper = JsonMapper.builder().build()
     private val request =
         ModelGenerationRequest(
-            instructions = "Generate a safe template.",
+            instructions = "Generate safe quirky prose.",
             inputJson = """{"job_category":"technology_engineering"}""",
             outputSchemaJson =
-                """{"type":"object","properties":{"template_id":{"type":"string","enum":["quirky_side_quest"]}},"required":["template_id"],"additionalProperties":false}""",
+                """{"type":"object","properties":{"bio_template":{"type":"string"}},"required":["bio_template"],"additionalProperties":false}""",
             maxOutputTokens = 256,
         )
 
@@ -38,12 +38,15 @@ class ModelProviderClientTest {
                     200,
                     """
                     {
+                      "object": "response",
                       "status": "completed",
                       "output": [{
                         "type": "message",
+                        "role": "assistant",
+                        "status": "completed",
                         "content": [{
                           "type": "output_text",
-                          "text": "{\"template_id\":\"quirky_side_quest\"}"
+                          "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
                         }]
                       }]
                     }
@@ -61,7 +64,7 @@ class ModelProviderClientTest {
 
         assertEquals(
             ModelProviderResult.Generated(
-                """{"template_id":"quirky_side_quest"}""",
+                VALID_PROSE_OUTPUT,
             ),
             result,
         )
@@ -89,6 +92,119 @@ class ModelProviderClientTest {
                 .path("additionalProperties")
                 .asBoolean(),
         )
+        assertEquals(
+            OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+            body.path("text").path("format").path("schema")
+                .path("properties").path("bio_template").path("pattern").stringValue(),
+        )
+        val placeholderPattern = Regex(OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN)
+        listOf(
+            "{{NAME}} a {{JOB}} b {{HOBBY}}.",
+            "{{NAME}} a {{HOBBY}} b {{JOB}}.",
+            "{{JOB}} a {{NAME}} b {{HOBBY}}.",
+            "{{JOB}} a {{HOBBY}} b {{NAME}}.",
+            "{{HOBBY}} a {{NAME}} b {{JOB}}.",
+            "{{HOBBY}} a {{JOB}} b {{NAME}}.",
+        ).forEach { template ->
+            assertTrue(placeholderPattern.matches(template), template)
+        }
+        listOf(
+            "{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}, and {{NAME}} smiles.",
+            "{{NAME}} gives {{HOBBY}} a quirky spin.",
+            "{{NAME}} gives {{HOBBY}} a quirky spin as a {{JOB}} with {{UNKNOWN}}.",
+        ).forEach { template ->
+            assertFalse(placeholderPattern.matches(template), template)
+        }
+    }
+
+    @Test
+    fun `OpenAI GPT 5_6 disables reasoning for the bounded structured prose task`() {
+        val transport = RecordingTransport(validOpenAiResponse())
+
+        val result =
+            OpenAiModelProviderClient(
+                apiKey = "openai-test-credential",
+                model = "gpt-5.6-luna",
+                timeout = Duration.ofSeconds(7),
+                objectMapper = objectMapper,
+                transport = transport,
+            ).generate(request)
+
+        assertEquals(ModelProviderResult.Generated(VALID_PROSE_OUTPUT), result)
+        val body = objectMapper.readTree(requireNotNull(transport.request).body)
+        assertEquals("none", body.path("reasoning").path("effort").stringValue())
+    }
+
+    @Test
+    fun `OpenAI client fails closed before transport when the canonical bio schema is missing`() {
+        val transport = RecordingTransport(validOpenAiResponse())
+        val malformedSchemaRequest =
+            ModelGenerationRequest(
+                instructions = request.instructions,
+                inputJson = request.inputJson,
+                outputSchemaJson = """{"type":"object","properties":{}}""",
+                maxOutputTokens = request.maxOutputTokens,
+            )
+
+        assertEquals(
+            ModelProviderResult.Failure(BioGenerationFailure.UNAVAILABLE),
+            openAiClient(transport).generate(malformedSchemaRequest),
+        )
+        assertEquals(null, transport.request)
+    }
+
+    @Test
+    fun `OpenAI client ignores reasoning items and extracts the single final structured message`() {
+        val response =
+            ProviderHttpResponse(
+                200,
+                """
+                {
+                  "object": "response",
+                  "status": "completed",
+                  "output": [
+                    {"type": "reasoning", "id": "reasoning-item"},
+                    {
+                      "type": "message",
+                      "role": "assistant",
+                      "status": "completed",
+                      "content": [{
+                        "type": "output_text",
+                        "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
+                      }]
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+
+        assertEquals(
+            ModelProviderResult.Generated(VALID_PROSE_OUTPUT),
+            openAiClient(ProviderHttpTransport { response }).generate(request),
+        )
+    }
+
+    @Test
+    fun `OpenAI client rejects malformed completed response envelopes`() {
+        val malformedResponses =
+            listOf(
+                """{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"safe output"}]}]}""",
+                """{"object":"response","status":"completed","output":[{"type":"message","role":"user","status":"completed","content":[{"type":"output_text","text":"safe output"}]}]}""",
+                """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"safe output"}]}]}""",
+                """{"object":"response","status":"completed","output":{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"safe output"}]}}""",
+                """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":{"type":"output_text","text":"safe output"}}]}""",
+            )
+
+        malformedResponses.forEach { body ->
+            assertEquals(
+                ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
+                openAiClient(
+                    ProviderHttpTransport {
+                        ProviderHttpResponse(200, body)
+                    },
+                ).generate(request),
+            )
+        }
     }
 
     @Test
@@ -103,7 +219,7 @@ class ModelProviderClientTest {
                         "finishReason": "STOP",
                         "content": {
                           "parts": [{
-                            "text": "{\"template_id\":\"quirky_side_quest\"}"
+                            "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
                           }]
                         }
                       }]
@@ -122,7 +238,7 @@ class ModelProviderClientTest {
 
         assertEquals(
             ModelProviderResult.Generated(
-                """{"template_id":"quirky_side_quest"}""",
+                VALID_PROSE_OUTPUT,
             ),
             result,
         )
@@ -174,7 +290,7 @@ class ModelProviderClientTest {
                       "stop_reason": "end_turn",
                       "content": [{
                         "type": "text",
-                        "text": "{\"template_id\":\"quirky_side_quest\"}"
+                        "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
                       }]
                     }
                     """.trimIndent(),
@@ -191,7 +307,7 @@ class ModelProviderClientTest {
 
         assertEquals(
             ModelProviderResult.Generated(
-                """{"template_id":"quirky_side_quest"}""",
+                VALID_PROSE_OUTPUT,
             ),
             result,
         )
@@ -249,7 +365,7 @@ class ModelProviderClientTest {
                 ProviderHttpTransport {
                     ProviderHttpResponse(
                         200,
-                        """{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"not allowed"}]}]}""",
+                        """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"refusal","refusal":"not allowed"}]}]}""",
                     )
                 },
             ).generate(request),
@@ -276,17 +392,6 @@ class ModelProviderClientTest {
                 },
             ).generate(request),
         )
-        assertEquals(
-            ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
-            anthropicClient(
-                ProviderHttpTransport {
-                    ProviderHttpResponse(
-                        200,
-                        """{"type":"message","role":"assistant","stop_reason":"max_tokens","content":[]}""",
-                    )
-                },
-            ).generate(request),
-        )
 
         listOf(
             openAiClient(oversizedTransport()),
@@ -296,6 +401,42 @@ class ModelProviderClientTest {
             assertEquals(
                 ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
                 client.generate(request),
+            )
+        }
+    }
+
+    @Test
+    fun `provider truncation signals normalize to invalid output`() {
+        listOf(
+            "OpenAI" to
+                openAiClient(
+                    ProviderHttpTransport {
+                        ProviderHttpResponse(200, """{"status":"incomplete"}""")
+                    },
+                ),
+            "Gemini" to
+                geminiClient(
+                    ProviderHttpTransport {
+                        ProviderHttpResponse(
+                            200,
+                            """{"candidates":[{"finishReason":"MAX_TOKENS"}]}""",
+                        )
+                    },
+                ),
+            "Anthropic" to
+                anthropicClient(
+                    ProviderHttpTransport {
+                        ProviderHttpResponse(
+                            200,
+                            """{"type":"message","role":"assistant","stop_reason":"max_tokens","content":[]}""",
+                        )
+                    },
+                ),
+        ).forEach { (provider, client) ->
+            assertEquals(
+                ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
+                client.generate(request),
+                provider,
             )
         }
     }
@@ -363,7 +504,7 @@ class ModelProviderClientTest {
     }
 
     @Test
-    fun `complete adapter envelopes have no customer correlation tracing baggage tools or telemetry fields`() {
+    fun `application-owned requests have no customer correlation tracing baggage tools or telemetry fields`() {
         val sentRequests =
             listOf(
                 RecordingTransport(validOpenAiResponse()).also { openAiClient(it).generate(request) },
@@ -372,7 +513,7 @@ class ModelProviderClientTest {
             ).map { requireNotNull(it.request) }
 
         sentRequests.forEach { sent ->
-            val completeEnvelope =
+            val completeRequest =
                 listOf(
                     sent.method,
                     sent.uri.toString(),
@@ -395,11 +536,18 @@ class ModelProviderClientTest {
                 "tool_choice",
                 "previous_response_id",
             ).forEach { forbidden ->
-                assertFalse(completeEnvelope.contains(forbidden, ignoreCase = true), forbidden)
+                assertFalse(completeRequest.contains(forbidden, ignoreCase = true), forbidden)
             }
         }
         val openAiBody = objectMapper.readTree(sentRequests[0].body)
         assertFalse(openAiBody.path("store").asBoolean())
+        assertEquals(
+            OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+            openAiBody.path("text").path("format").path("schema")
+                .path("properties").path("bio_template").path("pattern").stringValue(),
+        )
+        assertFalse(sentRequests[1].body.contains("\"pattern\""))
+        assertFalse(sentRequests[2].body.contains("\"pattern\""))
         assertFalse(sentRequests[1].body.contains("cachedContent"))
         assertFalse(sentRequests[2].body.contains("metadata"))
     }
@@ -440,11 +588,14 @@ class ModelProviderClientTest {
     }
 
     @Test
-    fun `malformed truncated and wrapper-invalid success responses normalize to invalid output`() {
+    fun `malformed or structurally incomplete provider success responses normalize to invalid output`() {
         listOf(
             openAiClient(ProviderHttpTransport { ProviderHttpResponse(200, "{") }),
             geminiClient(ProviderHttpTransport { ProviderHttpResponse(200, "{") }),
             anthropicClient(ProviderHttpTransport { ProviderHttpResponse(200, "{") }),
+            openAiClient(ProviderHttpTransport { ProviderHttpResponse(200, "{}") }),
+            geminiClient(ProviderHttpTransport { ProviderHttpResponse(200, "{}") }),
+            anthropicClient(ProviderHttpTransport { ProviderHttpResponse(200, "{}") }),
         ).forEach { client ->
             assertEquals(
                 ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
@@ -465,19 +616,19 @@ class ModelProviderClientTest {
     private fun validOpenAiResponse() =
         ProviderHttpResponse(
             200,
-            """{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"template_id\":\"quirky_side_quest\"}"}]}]}""",
+            """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"}]}]}""",
         )
 
     private fun validGeminiResponse() =
         ProviderHttpResponse(
             200,
-            """{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"template_id\":\"quirky_side_quest\"}"}]}}]}""",
+            """{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"}]}}]}""",
         )
 
     private fun validAnthropicResponse() =
         ProviderHttpResponse(
             200,
-            """{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"{\"template_id\":\"quirky_side_quest\"}"}]}""",
+            """{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"}]}""",
         )
 
     private fun openAiClient(transport: ProviderHttpTransport) =
@@ -515,6 +666,11 @@ class ModelProviderClientTest {
                 bodyTooLarge = true,
             )
         }
+
+    private companion object {
+        const val VALID_PROSE_OUTPUT =
+            """{"bio_template":"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}."}"""
+    }
 
     private class RecordingTransport(
         private val response: ProviderHttpResponse,

@@ -1,3 +1,4 @@
+import org.gradle.api.tasks.JavaExec
 import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -58,4 +59,46 @@ tasks.withType<Test> {
 			environment("TESTCONTAINERS_DOCKER_SOCKET_OVERRIDE", "/var/run/docker.sock")
 		}
 	}
+}
+
+val testSourceSet = sourceSets["test"]
+
+tasks.register<Test>("liveAiSmoke") {
+	group = "verification"
+	description = "Runs exactly one selected provider's explicit three-call live AI smoke"
+	testClassesDirs = testSourceSet.output.classesDirs
+	classpath = testSourceSet.runtimeClasspath
+	filter {
+		includeTestsMatching(
+			"com.persons.finder.person.bio.remote.RemoteBioGeneratorLiveTest",
+		)
+	}
+	systemProperty("liveAiSmoke.required", "true")
+	systemProperty(
+		"liveAiSmoke.reportDir",
+		layout.buildDirectory.dir("reports/live-ai-smoke").get().asFile.absolutePath,
+	)
+	systemProperty(
+		"liveAiSmoke.durableReportDir",
+		layout.projectDirectory.dir(".agents/evidence/live-ai-smoke").asFile.absolutePath,
+	)
+	outputs.upToDateWhen { false }
+}
+
+tasks.register<JavaExec>("liveAiEval") {
+	group = "verification"
+	description = "Runs the explicit, billable live AI reliability evaluation"
+	dependsOn(tasks.named("testClasses"))
+	classpath = testSourceSet.runtimeClasspath
+	mainClass.set("com.persons.finder.person.bio.remote.eval.LiveBioEvalMain")
+	workingDir = layout.projectDirectory.asFile
+	systemProperty(
+		"liveAiEval.reportDir",
+		layout.buildDirectory.dir("reports/live-ai-eval").get().asFile.absolutePath,
+	)
+	systemProperty(
+		"liveAiEval.durableReportDir",
+		layout.projectDirectory.dir(".agents/evidence/live-ai-eval").asFile.absolutePath,
+	)
+	outputs.upToDateWhen { false }
 }
