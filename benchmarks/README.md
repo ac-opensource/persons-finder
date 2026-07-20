@@ -115,8 +115,12 @@ accepted targets.
 
 Each seed records both the Git SHA and a SHA-256 fingerprint over benchmark
 scripts, production source, migrations, Dockerfiles, build files, and the
-normal Compose file. `run` refuses if that fingerprint changes after seeding,
-including changes that have not been committed.
+normal Compose file, including the Gradle wrapper JAR used by the application
+image build. For `run`, the database starts alone so the recorded SHA and
+fingerprint can be checked before either Spring application is built or allowed
+to connect. The application image is then built, the fingerprint is checked
+again, and only that verified image is started. `run` refuses if the source
+state changes after seeding, including changes that have not been committed.
 
 ## Dataset
 
@@ -127,8 +131,9 @@ UUID/location functions. There are no ORM save loops.
 - 300,000 winning locations use six 50,000-person, 20 km dense urban clusters.
 - Every person has one `INITIAL`, one `NO_KEY`, and three `CLIENT_UPDATE`
   observations.
-- Winner cohorts are exactly 750,000 chronological, 200,000 late-arrival,
-  40,000 equal-capture-time, and 10,000 equal-capture-and-receipt-time trails.
+- The corrected seed definition assigns 750,000 chronological, 200,000
+  late-arrival, 40,000 equal-capture-time/different-received-time, and 10,000
+  equal-capture-and-receipt-time trails.
 - The projection is rebuilt with:
 
 ```sql
@@ -136,8 +141,9 @@ ORDER BY person_id, captured_at DESC, received_at DESC, id DESC
 ```
 
 Correctness stops the run unless the projection matches all five million
-history rows, nearby returns at most one row per person, and every scenario
-matches an unindexed brute-force oracle using the same winner rule.
+history rows, the corrected received-at and UUID tiebreak cohorts have their
+declared timestamp shapes, nearby returns at most one row per person, and every
+scenario matches an unindexed brute-force oracle using the same winner rule.
 Before HTTP timing starts, that brute-force oracle is exported with expected
 result order, rounded distance, latitude, and longitude. Every measured HTTP
 response must match that oracle and the complete nearby response shape before
@@ -179,6 +185,9 @@ The command refuses incomplete or missing raw output and writes only
 `benchmarks/results/<run-id>/summary.md`. It does not create `RESULTS.md`.
 
 Warm results use 25 warm-ups followed by three blocks of 200 measurements.
+Mutating database workloads complete all four warm-up phases before the
+write-count baseline is captured, so warm-up mutations are excluded from every
+reported measured-block delta.
 Summary throughput is calculated independently for each measured repeat block,
 then reported as the median block rate; gaps between separate invocations are
 never included in a throughput denominator.

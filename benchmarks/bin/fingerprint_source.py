@@ -16,6 +16,7 @@ ROOT_FILES = (
     "compose.yaml",
     "gradlew",
     "gradle/wrapper/gradle-wrapper.properties",
+    "gradle/wrapper/gradle-wrapper.jar",
 )
 
 

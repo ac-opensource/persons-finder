@@ -200,7 +200,7 @@ prepared AS (
             WHEN 3 THEN base_time + interval '21 minutes'
             WHEN 4 THEN base_time + CASE
                 WHEN cohort BETWEEN 75 AND 94 THEN interval '50 minutes'
-                WHEN cohort BETWEEN 95 AND 98 THEN interval '41 minutes'
+                WHEN cohort BETWEEN 95 AND 98 THEN interval '40 minutes'
                 WHEN cohort = 99 THEN interval '42 minutes'
                 ELSE interval '31 minutes'
             END
@@ -343,3 +343,59 @@ BEGIN
     END IF;
 END
 $exact_count_check$;
+
+DO $winner_cohort_shape_check$
+DECLARE
+    received_at_tiebreak_trails bigint;
+    uuid_tiebreak_trails bigint;
+BEGIN
+    WITH cohort_person AS (
+        SELECT
+            person_ordinal,
+            mod(person_ordinal - 1, 100)::integer AS cohort
+        FROM generate_series(1, 1000000) AS generated(person_ordinal)
+        WHERE mod(person_ordinal - 1, 100) >= 95
+    ),
+    final_pair AS (
+        SELECT
+            cohort_person.cohort,
+            slot_4.id AS slot_4_id,
+            slot_4.captured_at AS slot_4_captured_at,
+            slot_4.received_at AS slot_4_received_at,
+            slot_5.id AS slot_5_id,
+            slot_5.captured_at AS slot_5_captured_at,
+            slot_5.received_at AS slot_5_received_at
+        FROM cohort_person
+        JOIN location_observation AS slot_4
+            ON slot_4.id = benchmark.deterministic_uuid(
+                'observation',
+                (cohort_person.person_ordinal - 1) * 5 + 4
+            )
+        JOIN location_observation AS slot_5
+            ON slot_5.id = benchmark.deterministic_uuid(
+                'observation',
+                (cohort_person.person_ordinal - 1) * 5 + 5
+            )
+    )
+    SELECT
+        count(*) FILTER (
+            WHERE cohort BETWEEN 95 AND 98
+              AND slot_4_captured_at = slot_5_captured_at
+              AND slot_4_received_at < slot_5_received_at
+        ),
+        count(*) FILTER (
+            WHERE cohort = 99
+              AND slot_4_captured_at = slot_5_captured_at
+              AND slot_4_received_at = slot_5_received_at
+              AND slot_4_id <> slot_5_id
+        )
+    INTO received_at_tiebreak_trails, uuid_tiebreak_trails
+    FROM final_pair;
+
+    IF received_at_tiebreak_trails <> 40000
+        OR uuid_tiebreak_trails <> 10000 THEN
+        RAISE EXCEPTION
+            'CORRECTNESS FAILURE: winner tiebreak cohorts do not match the approved dataset';
+    END IF;
+END
+$winner_cohort_shape_check$;

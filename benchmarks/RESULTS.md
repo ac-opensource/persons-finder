@@ -39,7 +39,12 @@ was supplied.
 ### Dataset and winner correctness
 
 The two completed seeds reported identical deterministic counts and identity
-checksums:
+checksums. A later source audit found that their manifest's intended
+received-at cohort labels did not match the generated timestamps: the 40,000
+trails labelled as received-at tiebreaks tied on both timestamps and therefore
+also resolved by UUID. The table preserves the manifest values and records the
+corrected interpretation rather than retroactively treating the old seeds as
+evidence for a received-at tiebreak:
 
 | Measure | `seed-20260720T153509Z` | `seed-20260720T154141Z` |
 | --- | ---: | ---: |
@@ -51,9 +56,17 @@ checksums:
 | Client-update observations | 3,000,000 | 3,000,000 |
 | Chronological trails | 750,000 | 750,000 |
 | Late-arrival trails | 200,000 | 200,000 |
-| Received-at tiebreak trails | 40,000 | 40,000 |
-| UUID-tiebreak trails | 10,000 | 10,000 |
+| Manifest-labelled received-at tiebreak trails | 40,000 | 40,000 |
+| Received-at tiebreak trails actually exercised | 0 | 0 |
+| Manifest-labelled UUID-tiebreak trails | 10,000 | 10,000 |
+| UUID-tiebreak trails actually exercised | 50,000 | 50,000 |
 | Deterministic identity checksum | `945806b90bcb4cf75bb94b2ccf656905` | `945806b90bcb4cf75bb94b2ccf656905` |
+
+The seed generator is corrected in the current source so slot 5 wins the
+40,000 equal-capture-time trails by `received_at`. That correction has not
+been reseeded in the supplied artifacts, so a fresh `reset` and `seed` is
+required before those cohort counts can be verified against the current
+implementation.
 
 The full winner/trail-depth check compared 1,000,000 production projection
 rows with 1,000,000 oracle rows in each completed seed. Both reported:
