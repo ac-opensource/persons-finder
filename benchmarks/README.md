@@ -64,6 +64,11 @@ wrong expected database:
 has not passed correctness or has already been measured. Repeatable runs
 therefore use `reset`, `seed`, then `run`.
 
+Creating or moving a person through the seeded dashboard changes the benchmark
+database. The `run` preflight rejects changed seed cardinalities, identity, or
+projection state. After an interactive dashboard demo, use `reset` and `seed`
+again before measuring, and do not modify the dashboard while `run` is active.
+
 ## Hypotheses and falsification thresholds
 
 These are predeclared targets, not measured results:

@@ -48,9 +48,13 @@ def pgbench_samples(run_dir: Path) -> dict[str, list[Sample]]:
             with path.open(encoding="utf-8") as source:
                 for line in source:
                     fields = line.split()
-                    if len(fields) >= 5:
+                    if len(fields) >= 6:
+                        completed_at_us = (
+                            int(fields[4]) * 1_000_000
+                            + int(fields[5])
+                        )
                         groups[f"{category}/{match.group(1)}"].append(
-                            (float(fields[2]) / 1000.0, int(fields[4]))
+                            (float(fields[2]) / 1000.0, completed_at_us)
                         )
     return groups
 

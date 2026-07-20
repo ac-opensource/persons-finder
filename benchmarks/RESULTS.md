@@ -8,8 +8,7 @@ Consequently, this document makes no database-latency, HTTP-latency,
 throughput, indexed-versus-unindexed, plan-shape, or production-capacity
 claim.
 
-The request named commit `[SHA]`, which is a placeholder rather than a concrete
-commit. Both completed raw manifests record:
+Both completed raw manifests record:
 
 - application Git SHA:
   `2a594887558f3f456290f2ec4d62ce691ae7c8a9`
