@@ -92,6 +92,29 @@ class ModelProviderClientTest {
                 .path("additionalProperties")
                 .asBoolean(),
         )
+        assertEquals(
+            OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+            body.path("text").path("format").path("schema")
+                .path("properties").path("bio_template").path("pattern").stringValue(),
+        )
+        val placeholderPattern = Regex(OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN)
+        listOf(
+            "{{NAME}} a {{JOB}} b {{HOBBY}}.",
+            "{{NAME}} a {{HOBBY}} b {{JOB}}.",
+            "{{JOB}} a {{NAME}} b {{HOBBY}}.",
+            "{{JOB}} a {{HOBBY}} b {{NAME}}.",
+            "{{HOBBY}} a {{NAME}} b {{JOB}}.",
+            "{{HOBBY}} a {{JOB}} b {{NAME}}.",
+        ).forEach { template ->
+            assertTrue(placeholderPattern.matches(template), template)
+        }
+        listOf(
+            "{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}, and {{NAME}} smiles.",
+            "{{NAME}} gives {{HOBBY}} a quirky spin.",
+            "{{NAME}} gives {{HOBBY}} a quirky spin as a {{JOB}} with {{UNKNOWN}}.",
+        ).forEach { template ->
+            assertFalse(placeholderPattern.matches(template), template)
+        }
     }
 
     @Test
@@ -110,6 +133,24 @@ class ModelProviderClientTest {
         assertEquals(ModelProviderResult.Generated(VALID_PROSE_OUTPUT), result)
         val body = objectMapper.readTree(requireNotNull(transport.request).body)
         assertEquals("none", body.path("reasoning").path("effort").stringValue())
+    }
+
+    @Test
+    fun `OpenAI client fails closed before transport when the canonical bio schema is missing`() {
+        val transport = RecordingTransport(validOpenAiResponse())
+        val malformedSchemaRequest =
+            ModelGenerationRequest(
+                instructions = request.instructions,
+                inputJson = request.inputJson,
+                outputSchemaJson = """{"type":"object","properties":{}}""",
+                maxOutputTokens = request.maxOutputTokens,
+            )
+
+        assertEquals(
+            ModelProviderResult.Failure(BioGenerationFailure.UNAVAILABLE),
+            openAiClient(transport).generate(malformedSchemaRequest),
+        )
+        assertEquals(null, transport.request)
     }
 
     @Test
@@ -500,6 +541,13 @@ class ModelProviderClientTest {
         }
         val openAiBody = objectMapper.readTree(sentRequests[0].body)
         assertFalse(openAiBody.path("store").asBoolean())
+        assertEquals(
+            OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+            openAiBody.path("text").path("format").path("schema")
+                .path("properties").path("bio_template").path("pattern").stringValue(),
+        )
+        assertFalse(sentRequests[1].body.contains("\"pattern\""))
+        assertFalse(sentRequests[2].body.contains("\"pattern\""))
         assertFalse(sentRequests[1].body.contains("cachedContent"))
         assertFalse(sentRequests[2].body.contains("metadata"))
     }

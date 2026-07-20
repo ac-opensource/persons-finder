@@ -7,6 +7,15 @@ import java.time.Duration
 import tools.jackson.core.JacksonException
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
+import tools.jackson.databind.node.ObjectNode
+
+internal const val OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN =
+    """^([^{}]*\{\{NAME\}\}[^{}]*\{\{JOB\}\}[^{}]*\{\{HOBBY\}\}[^{}]*|""" +
+        """[^{}]*\{\{NAME\}\}[^{}]*\{\{HOBBY\}\}[^{}]*\{\{JOB\}\}[^{}]*|""" +
+        """[^{}]*\{\{JOB\}\}[^{}]*\{\{NAME\}\}[^{}]*\{\{HOBBY\}\}[^{}]*|""" +
+        """[^{}]*\{\{JOB\}\}[^{}]*\{\{HOBBY\}\}[^{}]*\{\{NAME\}\}[^{}]*|""" +
+        """[^{}]*\{\{HOBBY\}\}[^{}]*\{\{NAME\}\}[^{}]*\{\{JOB\}\}[^{}]*|""" +
+        """[^{}]*\{\{HOBBY\}\}[^{}]*\{\{JOB\}\}[^{}]*\{\{NAME\}\}[^{}]*)$"""
 
 internal class OpenAiModelProviderClient(
     private val apiKey: String,
@@ -67,7 +76,7 @@ internal class OpenAiModelProviderClient(
                             "type" to "json_schema",
                             "name" to "bio_template",
                             "strict" to true,
-                            "schema" to objectMapper.readTree(outputSchemaJson),
+                            "schema" to openAiOutputSchema(outputSchemaJson),
                         ),
                 ),
         ).apply {
@@ -75,6 +84,20 @@ internal class OpenAiModelProviderClient(
                 put("reasoning", mapOf("effort" to "none"))
             }
         }
+
+    private fun openAiOutputSchema(outputSchemaJson: String): JsonNode {
+        val schema = objectMapper.readTree(outputSchemaJson)
+        val bioTemplateSchema =
+            schema.path("properties").path("bio_template") as? ObjectNode
+                ?: throw IllegalArgumentException(
+                    "OpenAI bio output schema requires a bio_template object",
+                )
+        bioTemplateSchema.put(
+            "pattern",
+            OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+        )
+        return schema
+    }
 
     private fun parseResponse(response: ProviderHttpResponse): ModelProviderResult {
         failureForHttpStatus(response.statusCode)?.let {

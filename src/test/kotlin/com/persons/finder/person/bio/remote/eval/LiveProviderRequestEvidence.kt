@@ -4,11 +4,13 @@ import com.persons.finder.person.bio.BIO_GENERATION_DEADLINE
 import com.persons.finder.person.bio.BioTemplateRequest
 import com.persons.finder.person.bio.SafeInterestCode
 import com.persons.finder.person.bio.SafeJobCode
+import com.persons.finder.person.bio.remote.OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN
 import com.persons.finder.person.bio.remote.ProviderHttpRequest
 import java.nio.charset.StandardCharsets
 import tools.jackson.core.StreamReadFeature
 import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
+import tools.jackson.databind.node.ObjectNode
 
 internal data class SanitizedProviderRequestEvidence(
     val requestBodyBytes: Int,
@@ -32,6 +34,8 @@ internal data class SanitizedProviderRequestEvidence(
     val structuredOutputMode: String?,
     val structuredOutputStrict: Boolean?,
     val outputSchemaPresent: Boolean,
+    val outputSchemaFingerprintMatched: Boolean?,
+    val placeholderPatternMatched: Boolean?,
     val store: Boolean?,
     val reasoningEffort: String?,
     val thinkingMode: String?,
@@ -96,6 +100,10 @@ internal class LiveProviderRequestEvidenceAccumulator(
                         "structured_output_mode" to request.structuredOutputMode,
                         "structured_output_strict" to request.structuredOutputStrict,
                         "output_schema_present" to request.outputSchemaPresent,
+                        "output_schema_fingerprint_matched" to
+                            request.outputSchemaFingerprintMatched,
+                        "placeholder_pattern_matched" to
+                            request.placeholderPatternMatched,
                         "store" to request.store,
                         "reasoning_effort" to request.reasoningEffort,
                         "thinking_mode" to request.thinkingMode,
@@ -134,6 +142,14 @@ internal class LiveProviderRequestEvidenceAccumulator(
                 requests.mapNotNull { it.thinkingMode }.countValues(),
             "structured_output_mode_counts" to
                 requests.mapNotNull { it.structuredOutputMode }.countValues(),
+            "output_schema_fingerprint_reported_count" to
+                requests.count { it.outputSchemaFingerprintMatched != null },
+            "output_schema_fingerprint_match_count" to
+                requests.count { it.outputSchemaFingerprintMatched == true },
+            "placeholder_pattern_reported_count" to
+                requests.count { it.placeholderPatternMatched != null },
+            "placeholder_pattern_match_count" to
+                requests.count { it.placeholderPatternMatched == true },
             "requests_with_explicit_sampling_configuration" to
                 requests.count {
                     it.temperature != null ||
@@ -278,9 +294,17 @@ internal class LiveProviderRequestEvidenceAccumulator(
         val outputSchemaPresent = schema?.isObject == true
         val promptFingerprintMatched =
             instructions?.let(BioEvalHash::sha256) == expectedFingerprint.promptSha256
+        val placeholderPatternMatched =
+            schema
+                ?.path("properties")
+                ?.path("bio_template")
+                ?.get("pattern")
+                ?.takeIf(JsonNode::isString)
+                ?.stringValue() == OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN
         val outputSchemaFingerprintMatched =
             schema
                 ?.takeIf(JsonNode::isObject)
+                ?.let(::withoutOpenAiPlaceholderPattern)
                 ?.toString()
                 ?.let(BioEvalHash::sha256) == expectedFingerprint.outputSchemaSha256
         val inputAllowlistMatched =
@@ -329,6 +353,8 @@ internal class LiveProviderRequestEvidenceAccumulator(
             structuredOutputMode = structuredOutputMode,
             structuredOutputStrict = structuredOutputStrict,
             outputSchemaPresent = outputSchemaPresent,
+            outputSchemaFingerprintMatched = outputSchemaFingerprintMatched,
+            placeholderPatternMatched = placeholderPatternMatched,
             store = store,
             reasoningEffort = reasoningEffort,
             thinkingMode = null,
@@ -353,6 +379,7 @@ internal class LiveProviderRequestEvidenceAccumulator(
                     promptFingerprintMatched &&
                     inputAllowlistMatched &&
                     outputSchemaFingerprintMatched &&
+                    placeholderPatternMatched &&
                     maxOutputTokens == expectedFingerprint.maxOutputTokens &&
                     structuredOutputMode == "json_schema" &&
                     structuredOutputStrict == true &&
@@ -453,6 +480,8 @@ internal class LiveProviderRequestEvidenceAccumulator(
             structuredOutputMode = structuredOutputMode,
             structuredOutputStrict = null,
             outputSchemaPresent = outputSchemaPresent,
+            outputSchemaFingerprintMatched = outputSchemaFingerprintMatched,
+            placeholderPatternMatched = null,
             store = null,
             reasoningEffort = null,
             thinkingMode =
@@ -557,6 +586,8 @@ internal class LiveProviderRequestEvidenceAccumulator(
             structuredOutputMode = structuredOutputMode,
             structuredOutputStrict = null,
             outputSchemaPresent = outputSchemaPresent,
+            outputSchemaFingerprintMatched = outputSchemaFingerprintMatched,
+            placeholderPatternMatched = null,
             store = null,
             reasoningEffort = null,
             thinkingMode =
@@ -611,6 +642,8 @@ internal class LiveProviderRequestEvidenceAccumulator(
         structuredOutputMode: String?,
         structuredOutputStrict: Boolean?,
         outputSchemaPresent: Boolean,
+        outputSchemaFingerprintMatched: Boolean?,
+        placeholderPatternMatched: Boolean?,
         store: Boolean?,
         reasoningEffort: String?,
         thinkingMode: String?,
@@ -650,6 +683,8 @@ internal class LiveProviderRequestEvidenceAccumulator(
             structuredOutputMode = structuredOutputMode,
             structuredOutputStrict = structuredOutputStrict,
             outputSchemaPresent = outputSchemaPresent,
+            outputSchemaFingerprintMatched = outputSchemaFingerprintMatched,
+            placeholderPatternMatched = placeholderPatternMatched,
             store = store,
             reasoningEffort = reasoningEffort,
             thinkingMode = thinkingMode,
@@ -699,6 +734,8 @@ internal class LiveProviderRequestEvidenceAccumulator(
             structuredOutputMode = null,
             structuredOutputStrict = null,
             outputSchemaPresent = false,
+            outputSchemaFingerprintMatched = null,
+            placeholderPatternMatched = null,
             store = null,
             reasoningEffort = null,
             thinkingMode = null,
@@ -716,6 +753,20 @@ internal class LiveProviderRequestEvidenceAccumulator(
             stopSequenceCount = null,
             expectedConfigurationMatched = false,
         )
+
+    private fun withoutOpenAiPlaceholderPattern(schema: JsonNode): JsonNode? {
+        val normalized =
+            try {
+                objectMapper.readTree(schema.toString())
+            } catch (_: RuntimeException) {
+                return null
+            }
+        val bioTemplateSchema =
+            normalized.path("properties").path("bio_template") as? ObjectNode
+                ?: return null
+        bioTemplateSchema.remove("pattern")
+        return normalized
+    }
 
     private fun JsonNode.hasExactFields(expected: Set<String>): Boolean =
         isObject && propertyNames().asSequence().toSet() == expected

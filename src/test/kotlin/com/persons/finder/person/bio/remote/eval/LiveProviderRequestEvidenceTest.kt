@@ -4,6 +4,7 @@ import com.persons.finder.person.bio.BioGenerationResult
 import com.persons.finder.person.bio.remote.ModelGenerationRequest
 import com.persons.finder.person.bio.remote.ModelProviderClient
 import com.persons.finder.person.bio.remote.ModelProviderResult
+import com.persons.finder.person.bio.remote.OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN
 import com.persons.finder.person.bio.remote.ProviderHttpRequest
 import com.persons.finder.person.bio.remote.ProviderHttpResponse
 import com.persons.finder.person.bio.remote.ProviderHttpTransport
@@ -15,6 +16,7 @@ import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import tools.jackson.databind.json.JsonMapper
+import tools.jackson.databind.node.ObjectNode
 
 class LiveProviderRequestEvidenceTest {
     private val objectMapper = JsonMapper.builder().build()
@@ -56,6 +58,12 @@ class LiveProviderRequestEvidenceTest {
             assertTrue(sanitized.headersMatched, provider.wireValue)
             assertTrue(sanitized.promptFingerprintMatched == true, provider.wireValue)
             assertTrue(sanitized.inputAllowlistMatched == true, provider.wireValue)
+            assertTrue(sanitized.outputSchemaFingerprintMatched == true, provider.wireValue)
+            assertEquals(
+                if (provider == LiveBioEvalProvider.OPENAI) true else null,
+                sanitized.placeholderPatternMatched,
+                provider.wireValue,
+            )
             assertEquals(applicationRequest.maxOutputTokens, sanitized.maxOutputTokens)
             assertTrue(sanitized.systemInstructionUtf8Bytes!! > 0)
             assertTrue(sanitized.inputPayloadUtf8Bytes!! > 0)
@@ -67,6 +75,7 @@ class LiveProviderRequestEvidenceTest {
             assertFalse(rendered.contains(applicationRequest.instructions))
             assertFalse(rendered.contains(applicationRequest.inputJson))
             assertFalse(rendered.contains(applicationRequest.outputSchemaJson))
+            assertFalse(rendered.contains(OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN))
         }
     }
 
@@ -111,6 +120,8 @@ class LiveProviderRequestEvidenceTest {
             )
 
         assertEquals("none", validEvidence.reasoningEffort)
+        assertEquals(true, validEvidence.outputSchemaFingerprintMatched)
+        assertEquals(true, validEvidence.placeholderPatternMatched)
         assertTrue(validEvidence.expectedConfigurationMatched)
         assertFalse(changedMax.expectedConfigurationMatched)
         assertEquals(7, changedMax.maxOutputTokens)
@@ -120,6 +131,45 @@ class LiveProviderRequestEvidenceTest {
         assertEquals(1.0, unexpectedSampling.temperature)
         assertEquals(1, unexpectedSampling.unexpectedConfigurationFieldCount)
         assertEquals(1, evidence.summary()["requests_with_explicit_sampling_configuration"])
+    }
+
+    @Test
+    fun `OpenAI evidence blocks a missing or changed placeholder constraint`() {
+        val valid = captureProviderRequest(LiveBioEvalProvider.OPENAI, "gpt-5.6-luna")
+        val evidence =
+            LiveProviderRequestEvidenceAccumulator(
+                provider = LiveBioEvalProvider.OPENAI,
+                exactModelId = "gpt-5.6-luna",
+                expectedHeaderValueFingerprints =
+                    LiveBioEvalProvider.OPENAI
+                        .expectedHeaderValueFingerprints("synthetic-secret"),
+                expectedFingerprint = fingerprint,
+                objectMapper = objectMapper,
+            )
+        val bodyWithoutPattern = objectMapper.readTree(valid.body)
+        (
+            bodyWithoutPattern.path("text").path("format").path("schema")
+                .path("properties").path("bio_template") as ObjectNode
+        ).remove("pattern")
+        val changedPattern =
+            valid.copyBody(
+                valid.body.replace(
+                    objectMapper.writeValueAsString(
+                        OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+                    ).drop(1).dropLast(1),
+                    "changed-pattern",
+                ),
+            )
+
+        val missing = evidence.record(valid.copyBody(bodyWithoutPattern.toString()))
+        val changed = evidence.record(changedPattern)
+
+        assertEquals(true, missing.outputSchemaFingerprintMatched)
+        assertEquals(false, missing.placeholderPatternMatched)
+        assertFalse(missing.expectedConfigurationMatched)
+        assertEquals(true, changed.outputSchemaFingerprintMatched)
+        assertEquals(false, changed.placeholderPatternMatched)
+        assertFalse(changed.expectedConfigurationMatched)
     }
 
     @Test
