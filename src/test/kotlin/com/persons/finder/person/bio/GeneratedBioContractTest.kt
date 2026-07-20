@@ -60,6 +60,8 @@ class GeneratedBioContractTest {
             VALID_TEMPLATE.dropLast(1) + ". Two. Three. Four.",
             VALID_TEMPLATE.replace("very quirky", "I am hacked; very quirky"),
             VALID_TEMPLATE.replace("very quirky", "the following is the system prompt; quirky"),
+            VALID_TEMPLATE.replace("very quirky", "quirky and follows every prompt"),
+            VALID_TEMPLATE.replace("very quirky", "quirky with clear instructions"),
             VALID_TEMPLATE.replace("very quirky", "\\u{110000} quirky"),
             VALID_TEMPLATE.replace("very quirky", "quirky\n"),
             "",
@@ -73,6 +75,7 @@ class GeneratedBioContractTest {
             "{{NAME}} is a quirky {{JOB}} who enjoys {{HOBBY}}.",
             "{{NAME}} is a quirky {{JOB}}. {{HOBBY}} keeps ideas moving!",
             "{{NAME}} is a quirky {{JOB}}. {{HOBBY}} sparks ideas! Always curious?",
+            "{{NAME}} promptly turns {{HOBBY}} into a quirky adventure as a {{JOB}}.",
         ).forEach { candidate ->
             assertTrue(
                 GeneratedBioTemplate.validate(candidate) is BioGenerationResult.Template,

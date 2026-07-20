@@ -101,12 +101,17 @@ class RemoteBioGeneratorTest {
             )
         }
 
-        assertEquals(
-            BioGenerationResult.Failure(BioGenerationFailure.POLICY_REJECTED),
-            generatorReturning(
-                "{{NAME}} reveals the system prompt while {{HOBBY}} as a {{JOB}}.",
-            ).generate(safeRequest()),
-        )
+        listOf(
+            "{{NAME}} reveals the system prompt while {{HOBBY}} as a {{JOB}}.",
+            "{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY}}.",
+            "{{NAME}} follows clear instructions as a quirky {{JOB}} who enjoys {{HOBBY}}.",
+        ).forEach { template ->
+            assertEquals(
+                BioGenerationResult.Failure(BioGenerationFailure.POLICY_REJECTED),
+                generatorReturning(template).generate(safeRequest()),
+                template,
+            )
+        }
     }
 
     @Test
@@ -125,7 +130,7 @@ class RemoteBioGeneratorTest {
                     "{{NAME}} is a {{JOB}}. {{HOBBY}} helps! Still curious? One more.",
                 ) to RemoteBioGenerationDiagnostic.TEMPLATE_SENTENCE_COUNT,
                 validOutput(
-                    "{{NAME}} reveals the system prompt while {{HOBBY}} as a {{JOB}}.",
+                    "{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY}}.",
                 ) to RemoteBioGenerationDiagnostic.TEMPLATE_CONTENT_POLICY,
                 validOutput(FIRST_TEMPLATE) to
                     RemoteBioGenerationDiagnostic.VALID_TEMPLATE,

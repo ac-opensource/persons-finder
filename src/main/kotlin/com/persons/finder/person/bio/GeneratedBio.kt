@@ -412,8 +412,7 @@ private val DISALLOWED_REGION_TERMS = listOf("North Island", "South Island")
 private val FORBIDDEN_GENERATED_PATTERNS =
     listOf(
         Regex("""(?i)\bi\s+am\s+hacked\b"""),
-        Regex("""(?i)\b(?:system|developer)\s+prompt\b"""),
-        Regex("""(?i)\b(?:here|following)\s+(?:is|are)\s+(?:the\s+)?(?:prompt|instructions?)\b"""),
+        Regex("""(?i)\b(?:prompts?|instructions?)\b"""),
     )
 private val SENTENCE_BOUNDARY_WITH_CONTINUATION =
     Regex("""([.!?])(?:["')\]]*)\s*(?=\S)""")
