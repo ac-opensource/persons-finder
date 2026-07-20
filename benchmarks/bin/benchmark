@@ -448,12 +448,14 @@ measure_nearby_database() {
 measure_nearby_http() {
     local run_dir="$1"
     local cardinalities="$2"
+    local oracle="$3"
     local scenario
     while IFS=, read -r scenario distribution latitude longitude radius rows distinct_rows; do
         [[ "${scenario}" == "scenario_id" ]] && continue
         python3 "${SCRIPT_DIR}/http_runner.py" \
             --base-url "${MAIN_BASE_URL}" \
             --cardinalities "${cardinalities}" \
+            --oracle "${oracle}" \
             --scenario "${scenario}" \
             --output "${run_dir}/nearby-http.jsonl" \
             --mode latency \
@@ -467,6 +469,7 @@ measure_nearby_http() {
             python3 "${SCRIPT_DIR}/http_runner.py" \
                 --base-url "${MAIN_BASE_URL}" \
                 --cardinalities "${cardinalities}" \
+                --oracle "${oracle}" \
                 --scenario "${scenario}" \
                 --output "${run_dir}/nearby-http-throughput.jsonl" \
                 --mode throughput \
@@ -531,6 +534,14 @@ capture_plans() {
                        :radius_km::double precision * 1000.0 AS radius_metres
             )
             SELECT person.id,
+                   person.name,
+                   person.job_title,
+                   person.hobbies,
+                   person.bio,
+                   person.created_at,
+                   projection.captured_at AS last_known_location_at,
+                   ST_Y(projection.location::geometry) AS latitude,
+                   ST_X(projection.location::geometry) AS longitude,
                    ST_Distance(projection.location, search.origin, true) AS distance_metres
             FROM last_known_location_projection AS projection
             JOIN person ON person.id = projection.person_id
@@ -685,7 +696,7 @@ command_run() {
     assert_seed_ready
     assert_source_state_matches_seed
 
-    local run_dir git_sha source_hash cardinalities
+    local run_dir git_sha source_hash cardinalities http_oracle
     run_dir="$(create_run_dir run)"
     git_sha="$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
     source_hash="$(source_fingerprint)"
@@ -697,10 +708,13 @@ command_run() {
     cardinalities="${run_dir}/cardinalities.csv"
     psql_main --quiet --csv --file /benchmarks/sql/cardinalities.sql \
         >"${cardinalities}"
+    http_oracle="${run_dir}/nearby-http-oracle.csv"
+    psql_main --quiet --csv --file /benchmarks/sql/http_nearby_oracle.sql \
+        >"${http_oracle}"
 
     record_restart_cold "${run_dir}"
     measure_nearby_database "${run_dir}" "${cardinalities}"
-    measure_nearby_http "${run_dir}" "${cardinalities}"
+    measure_nearby_http "${run_dir}" "${cardinalities}" "${http_oracle}"
     measure_baseline_database "${run_dir}"
     measure_history_database "${run_dir}"
     capture_plans "${run_dir}"

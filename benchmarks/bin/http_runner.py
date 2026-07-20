@@ -7,6 +7,7 @@ import argparse
 import concurrent.futures
 import csv
 import json
+import math
 import threading
 import time
 import urllib.parse
@@ -24,6 +25,14 @@ class Scenario:
     expected_rows: int
 
 
+@dataclass(frozen=True)
+class ExpectedNearby:
+    person_id: str
+    latitude: float
+    longitude: float
+    distance_km: float
+
+
 def load_scenarios(path: Path) -> dict[str, Scenario]:
     scenarios: dict[str, Scenario] = {}
     with path.open(newline="", encoding="utf-8") as source:
@@ -39,7 +48,135 @@ def load_scenarios(path: Path) -> dict[str, Scenario]:
     return scenarios
 
 
-def fetch(base_url: str, scenario: Scenario) -> dict[str, object]:
+def load_oracle(path: Path) -> dict[str, tuple[ExpectedNearby, ...]]:
+    expected: dict[str, list[ExpectedNearby]] = {}
+    with path.open(newline="", encoding="utf-8") as source:
+        for row in csv.DictReader(source):
+            expected.setdefault(row["scenario_id"], []).append(
+                ExpectedNearby(
+                    person_id=row["id"],
+                    latitude=float(row["latitude"]),
+                    longitude=float(row["longitude"]),
+                    distance_km=float(row["distance_km"]),
+                )
+            )
+    return {
+        scenario_id: tuple(items)
+        for scenario_id, items in expected.items()
+    }
+
+
+def require_number(value: object, field: str, scenario_id: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError(f"{scenario_id}: {field} must be a JSON number")
+    numeric = float(value)
+    if not math.isfinite(numeric):
+        raise RuntimeError(f"{scenario_id}: {field} must be finite")
+    return numeric
+
+
+def validate_item_shape(item: object, scenario_id: str) -> dict[str, object]:
+    if not isinstance(item, dict):
+        raise RuntimeError(f"{scenario_id}: nearby item must be a JSON object")
+    required_fields = {
+        "id",
+        "name",
+        "jobTitle",
+        "hobbies",
+        "bio",
+        "createdAt",
+        "lastKnownLocationAt",
+        "location",
+        "distanceKm",
+    }
+    if set(item) != required_fields:
+        raise RuntimeError(
+            f"{scenario_id}: nearby item fields differ from the API contract"
+        )
+    for field in ("id", "name", "jobTitle", "bio", "createdAt", "lastKnownLocationAt"):
+        if not isinstance(item[field], str):
+            raise RuntimeError(f"{scenario_id}: {field} must be a JSON string")
+    hobbies = item["hobbies"]
+    if not isinstance(hobbies, list) or not all(
+        isinstance(hobby, str) for hobby in hobbies
+    ):
+        raise RuntimeError(f"{scenario_id}: hobbies must be a JSON string array")
+    location = item["location"]
+    if not isinstance(location, dict) or set(location) != {"latitude", "longitude"}:
+        raise RuntimeError(
+            f"{scenario_id}: location must contain exactly latitude and longitude"
+        )
+    return item
+
+
+def validate_response(
+    decoded: list[object],
+    scenario: Scenario,
+    expected: tuple[ExpectedNearby, ...],
+) -> None:
+    if len(expected) != scenario.expected_rows:
+        raise RuntimeError(
+            f"{scenario.scenario_id}: oracle has {len(expected)} rows, "
+            f"cardinality file has {scenario.expected_rows}"
+        )
+    if len(decoded) != len(expected):
+        raise RuntimeError(
+            f"{scenario.scenario_id}: expected {len(expected)} rows, got {len(decoded)}"
+        )
+
+    seen_ids: set[str] = set()
+    for result_order, (raw_item, oracle_item) in enumerate(
+        zip(decoded, expected),
+        start=1,
+    ):
+        item = validate_item_shape(raw_item, scenario.scenario_id)
+        person_id = item["id"]
+        if person_id in seen_ids:
+            raise RuntimeError(
+                f"{scenario.scenario_id}: duplicate person at result {result_order}"
+            )
+        seen_ids.add(person_id)
+        if person_id != oracle_item.person_id:
+            raise RuntimeError(
+                f"{scenario.scenario_id}: wrong person or order at result {result_order}"
+            )
+
+        location = item["location"]
+        assert isinstance(location, dict)
+        latitude = require_number(
+            location["latitude"],
+            f"location.latitude at result {result_order}",
+            scenario.scenario_id,
+        )
+        longitude = require_number(
+            location["longitude"],
+            f"location.longitude at result {result_order}",
+            scenario.scenario_id,
+        )
+        distance_km = require_number(
+            item["distanceKm"],
+            f"distanceKm at result {result_order}",
+            scenario.scenario_id,
+        )
+        if not math.isclose(latitude, oracle_item.latitude, abs_tol=1e-12):
+            raise RuntimeError(
+                f"{scenario.scenario_id}: wrong latitude at result {result_order}"
+            )
+        if not math.isclose(longitude, oracle_item.longitude, abs_tol=1e-12):
+            raise RuntimeError(
+                f"{scenario.scenario_id}: wrong longitude at result {result_order}"
+            )
+        if not math.isclose(distance_km, oracle_item.distance_km, abs_tol=1e-9):
+            raise RuntimeError(
+                f"{scenario.scenario_id}: wrong distance at result {result_order}"
+            )
+
+
+def fetch(
+    base_url: str,
+    scenario: Scenario,
+    expected: tuple[ExpectedNearby, ...],
+) -> dict[str, object]:
     query = urllib.parse.urlencode(
         {
             "lat": scenario.latitude,
@@ -61,19 +198,13 @@ def fetch(base_url: str, scenario: Scenario) -> dict[str, object]:
         raise RuntimeError(
             f"{scenario.scenario_id}: expected HTTP 200 JSON array, got {status}"
         )
-    ids = [item["id"] for item in decoded]
-    if len(ids) != scenario.expected_rows:
-        raise RuntimeError(
-            f"{scenario.scenario_id}: expected {scenario.expected_rows} rows, got {len(ids)}"
-        )
-    if len(ids) != len(set(ids)):
-        raise RuntimeError(f"{scenario.scenario_id}: duplicate person in HTTP response")
+    validate_response(decoded, scenario, expected)
     return {
         "started_at_ns": started_at_ns,
         "scenario_id": scenario.scenario_id,
         "status": status,
         "elapsed_ns": elapsed_ns,
-        "rows_returned": len(ids),
+        "rows_returned": len(decoded),
         "response_bytes": len(payload),
     }
 
@@ -82,6 +213,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--cardinalities", required=True, type=Path)
+    parser.add_argument("--oracle", required=True, type=Path)
     parser.add_argument("--scenario", required=True)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--mode", choices=("latency", "throughput"), required=True)
@@ -93,10 +225,11 @@ def main() -> int:
     args = parser.parse_args()
 
     scenario = load_scenarios(args.cardinalities)[args.scenario]
+    expected = load_oracle(args.oracle).get(args.scenario, ())
     args.output.parent.mkdir(parents=True, exist_ok=True)
 
     for _ in range(args.warmup):
-        fetch(args.base_url, scenario)
+        fetch(args.base_url, scenario, expected)
 
     write_lock = threading.Lock()
     with args.output.open("a", encoding="utf-8") as output:
@@ -112,7 +245,7 @@ def main() -> int:
             for repeat in range(1, args.repeats + 1):
                 for iteration in range(1, args.iterations + 1):
                     record(
-                        fetch(args.base_url, scenario),
+                        fetch(args.base_url, scenario, expected),
                         mode="latency",
                         repeat=repeat,
                         iteration=iteration,
@@ -128,7 +261,7 @@ def main() -> int:
                     while time.monotonic() < deadline:
                         iteration += 1
                         record(
-                            fetch(args.base_url, scenario),
+                            fetch(args.base_url, scenario, expected),
                             mode="throughput",
                             repeat=repeat,
                             iteration=iteration,

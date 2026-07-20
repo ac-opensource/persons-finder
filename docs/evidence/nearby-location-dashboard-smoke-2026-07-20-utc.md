@@ -1,4 +1,8 @@
-# Nearby location and dashboard smoke — 2026-07-21
+# Nearby location and dashboard smoke — 2026-07-20 UTC
+
+Executed on 2026-07-21 in Asia/Manila (UTC+08:00), which was
+2026-07-20 UTC. The UTC date is used in this artifact's filename so repository
+and GitHub timestamps share the same time basis.
 
 ## Scope
 

@@ -11,6 +11,8 @@ SELECT
     person.bio,
     person.created_at,
     projection.captured_at AS last_known_location_at,
+    ST_Y(projection.location::geometry) AS latitude,
+    ST_X(projection.location::geometry) AS longitude,
     ST_Distance(projection.location, search.origin, true) AS distance_metres
 FROM last_known_location_projection AS projection
 JOIN person ON person.id = projection.person_id

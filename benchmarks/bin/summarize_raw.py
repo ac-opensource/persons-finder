@@ -9,11 +9,17 @@ import json
 import math
 import re
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 
-Sample = tuple[float, int]
+@dataclass(frozen=True)
+class Sample:
+    latency_ms: float
+    started_at: int
+    completed_at: int
+    repeat: int
 
 
 def percentile(values: list[float], fraction: float) -> float:
@@ -42,19 +48,25 @@ def pgbench_samples(run_dir: Path) -> dict[str, list[Sample]]:
         if not directory.exists():
             continue
         for path in directory.iterdir():
-            match = re.match(r"(.+)-r[123]-\.\d+(?:\.\d+)?$", path.name)
+            match = re.match(r"(.+)-r([123])-\.\d+(?:\.\d+)?$", path.name)
             if not match:
                 continue
             with path.open(encoding="utf-8") as source:
                 for line in source:
                     fields = line.split()
                     if len(fields) >= 6:
+                        latency_ms = float(fields[2]) / 1000.0
                         completed_at_us = (
                             int(fields[4]) * 1_000_000
                             + int(fields[5])
                         )
                         groups[f"{category}/{match.group(1)}"].append(
-                            (float(fields[2]) / 1000.0, completed_at_us)
+                            Sample(
+                                latency_ms=latency_ms,
+                                started_at=completed_at_us - round(latency_ms * 1000.0),
+                                completed_at=completed_at_us,
+                                repeat=int(match.group(2)),
+                            )
                         )
     return groups
 
@@ -70,18 +82,33 @@ def jsonl_samples(
         for line in source:
             item = json.loads(line)
             key = "/".join(str(item[field]) for field in key_fields)
+            started_at_ns = int(item["started_at_ns"])
+            elapsed_ns = int(item["elapsed_ns"])
             groups[key].append(
-                (float(item["elapsed_ns"]) / 1_000_000.0, int(item["started_at_ns"]))
+                Sample(
+                    latency_ms=elapsed_ns / 1_000_000.0,
+                    started_at=started_at_ns,
+                    completed_at=started_at_ns + elapsed_ns,
+                    repeat=int(item.get("repeat", 1)),
+                )
             )
     return groups
 
 
 def throughput(samples: list[Sample], timestamp_scale: float) -> str:
-    if len(samples) < 2:
-        return "n/a"
-    timestamps = [sample[1] for sample in samples]
-    seconds = (max(timestamps) - min(timestamps)) / timestamp_scale
-    return "n/a" if seconds <= 0 else f"{len(samples) / seconds:.2f}"
+    blocks: dict[int, list[Sample]] = defaultdict(list)
+    for sample in samples:
+        blocks[sample.repeat].append(sample)
+
+    rates: list[float] = []
+    for block_samples in blocks.values():
+        seconds = (
+            max(sample.completed_at for sample in block_samples)
+            - min(sample.started_at for sample in block_samples)
+        ) / timestamp_scale
+        if seconds > 0:
+            rates.append(len(block_samples) / seconds)
+    return "n/a" if not rates else f"{percentile(rates, 0.50):.2f}"
 
 
 def metric_rows(
@@ -90,7 +117,7 @@ def metric_rows(
 ) -> list[list[object]]:
     rows: list[list[object]] = []
     for name, samples in sorted(groups.items()):
-        latencies = [sample[0] for sample in samples]
+        latencies = [sample.latency_ms for sample in samples]
         rows.append(
             [
                 name,
@@ -165,21 +192,42 @@ def main() -> int:
         "## Database measurements",
         "",
         markdown_table(
-            ["Workload", "Samples", "p50 ms", "p95 ms", "p99 ms", "Throughput/s"],
+            [
+                "Workload",
+                "Samples",
+                "p50 ms",
+                "p95 ms",
+                "p99 ms",
+                "Median block throughput/s",
+            ],
             metric_rows(pgbench_samples(args.run_dir), 1_000_000.0),
         ),
         "",
         "## Core nearby HTTP measurements",
         "",
         markdown_table(
-            ["Workload", "Samples", "p50 ms", "p95 ms", "p99 ms", "Throughput/s"],
+            [
+                "Workload",
+                "Samples",
+                "p50 ms",
+                "p95 ms",
+                "p99 ms",
+                "Median block throughput/s",
+            ],
             metric_rows(http_groups, 1_000_000_000.0),
         ),
         "",
         "## Core write HTTP measurements",
         "",
         markdown_table(
-            ["Workload", "Samples", "p50 ms", "p95 ms", "p99 ms", "Throughput/s"],
+            [
+                "Workload",
+                "Samples",
+                "p50 ms",
+                "p95 ms",
+                "p99 ms",
+                "Median block throughput/s",
+            ],
             metric_rows(
                 jsonl_samples(
                     args.run_dir / "writes-http.jsonl",

@@ -138,6 +138,10 @@ ORDER BY person_id, captured_at DESC, received_at DESC, id DESC
 Correctness stops the run unless the projection matches all five million
 history rows, nearby returns at most one row per person, and every scenario
 matches an unindexed brute-force oracle using the same winner rule.
+Before HTTP timing starts, that brute-force oracle is exported with expected
+result order, rounded distance, latitude, and longitude. Every measured HTTP
+response must match that oracle and the complete nearby response shape before
+its timing is recorded.
 
 ## Result layout
 
@@ -152,8 +156,10 @@ benchmarks/results/<run-id>/
   sample-application-path.jsonl
   correctness.csv
   cardinalities.csv
+  nearby-http-oracle.csv
   nearby-db/
   nearby-http.jsonl
+  nearby-http-throughput.jsonl
   baseline-db/
   writes-db/
   writes-http.jsonl
@@ -173,6 +179,9 @@ The command refuses incomplete or missing raw output and writes only
 `benchmarks/results/<run-id>/summary.md`. It does not create `RESULTS.md`.
 
 Warm results use 25 warm-ups followed by three blocks of 200 measurements.
+Summary throughput is calculated independently for each measured repeat block,
+then reported as the median block rate; gaps between separate invocations are
+never included in a throughput denominator.
 Restart-first observations are labelled `restart-cold`, not true cold-cache
 measurements. A true cold-cache claim requires a disposable host or VM with a
 documented OS cache reset.
