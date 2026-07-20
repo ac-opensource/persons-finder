@@ -9,9 +9,10 @@ explicitly scoped as an internal sample, not an external audit or certification.
 `POST /persons` validates and canonicalizes profile fields before bio
 generation. A narrow source policy rejects deterministic instruction-
 manipulation patterns and explicit credential or identifier patterns in job
-titles and hobbies. The policy scans an NFKC-normalized security copy with
-default-ignorable format characters and variation selectors removed, while
-stored profile text remains NFC-canonical.
+titles and hobbies. The policy scans an NFKC-normalized security copy, then
+canonically decomposes it and removes combining marks used to split attack
+keywords. Default-ignorable format characters and variation selectors are also
+removed, while stored profile text remains NFC-canonical.
 Names are not scanned by that heuristic because names never participate in bio
 generation. Profile validation rejects controls, separators, and Unicode format
 controls used for bidi or invisible-text deception; ZWJ and ZWNJ remain allowed

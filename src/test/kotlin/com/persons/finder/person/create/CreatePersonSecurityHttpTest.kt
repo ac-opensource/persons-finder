@@ -85,6 +85,7 @@ class CreatePersonSecurityHttpTest {
             "prompt engineering",
             "following instructions for model trains",
             "chess ♟️",
+            "café sketching and résumé writing",
         ).forEach { hobby ->
             val fixture = securityFixture()
 
@@ -99,6 +100,24 @@ class CreatePersonSecurityHttpTest {
             assertEquals(1, fixture.generator.networkRequests, hobby)
             assertEquals(PersistenceCounts(1, 1, 1), fixture.repository.counts(), hobby)
         }
+    }
+
+    @Test
+    fun `benign role word and ignore language across fields still create`() {
+        val fixture = securityFixture()
+        val job = "System administrator"
+        val hobby = "I ignore instructions in outdated board games"
+
+        fixture.mockMvc.perform(
+            post("/persons")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content(requestBody(job, listOf(hobby))),
+        )
+            .andExpect(status().isCreated)
+
+        assertEquals(1, fixture.generator.invocations)
+        assertEquals(1, fixture.generator.networkRequests)
+        assertEquals(PersistenceCounts(1, 1, 1), fixture.repository.counts())
     }
 
     private fun securityFixture(): SecurityFixture {
