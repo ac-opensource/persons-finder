@@ -79,6 +79,61 @@ and PostGIS inside Compose; do not install a host database. The backend is
 published only on loopback, the database has no host port, and the default stack
 contains no OIDC or external AI service.
 
+The default bio generator is deterministic and credential-free. An explicitly
+networked runtime can instead select one remote provider and one model:
+
+| Environment variable | Remote value |
+|---|---|
+| `PERSONS_BIO_GENERATOR` | `remote` |
+| `PERSONS_RUNTIME_MODE` | `network-private` |
+| `PERSONS_BIO_REMOTE_PROVIDER` | `openai`, `gemini`, or `anthropic` |
+| `PERSONS_BIO_REMOTE_MODEL` | A model ID enabled for the selected provider |
+| `PERSONS_BIO_REMOTE_TIMEOUT` | Optional adapter timeout from `1s` through the application-owned `10s` deadline; default `10s` |
+| `OPENAI_API_KEY` | Required only when the selected provider is `openai` |
+| `GEMINI_API_KEY` | Required only when the selected provider is `gemini` |
+| `ANTHROPIC_API_KEY` | Required only when the selected provider is `anthropic` |
+
+Optional provider keys may be stored at rest in the ignored local files
+`.secrets/openai-api-key`, `.secrets/gemini-api-key`, and
+`.secrets/anthropic-api-key`. The application and opt-in live tests do not read
+those file paths automatically: the operator or local secret launcher must
+expose the selected key through the matching environment variable above.
+Key provisioning, billing, and rotation remain deployment-operator
+responsibilities and are intentionally not tutorialized here. Invalid
+provider/model/credential/runtime combinations fail startup. There is no
+automatic provider or deterministic fallback.
+
+The tracked Compose stack does not mount AI credentials: it remains
+deterministic and credential-free. The ignored `.secrets/database-password`
+file described below is only the evaluator database password; it is not an AI
+credential source.
+
+All providers use the same application-owned `BioGenerator` boundary. The
+remote adapter sends only closed, sanitized category codes and deployment
+constants, and allows the model to select only a closed application-owned
+template ID. The application resolves that ID to a validated three-placeholder
+template, then a trusted one-pass local composer inserts the validated name,
+raw job title, and selected original hobby as opaque values. Those source
+values, coordinates, identifiers, and access tokens never cross the model
+boundary. See `SECURITY.md` for the complete boundary.
+
+The normal test suite makes no provider calls. To run the billable,
+credential-gated live adapter smoke tests:
+
+```bash
+RUN_LIVE_AI_TESTS=true \
+OPENAI_LIVE_CONTENT_LOGGING_DISABLED_CONFIRMED=true \
+GEMINI_LIVE_CONTENT_LOGGING_DISABLED_CONFIRMED=true \
+ANTHROPIC_LIVE_CONTENT_LOGGING_DISABLED_CONFIRMED=true \
+LIVE_AI_AUTOMATIC_TELEMETRY_DISABLED_CONFIRMED=true \
+LIVE_AI_COMPLETE_ENVELOPE_INSPECTION_CONFIRMED=true \
+OPENAI_LIVE_MODEL='<enabled-openai-model>' \
+GEMINI_LIVE_MODEL='<enabled-gemini-model>' \
+ANTHROPIC_LIVE_MODEL='<enabled-anthropic-model>' \
+./gradlew test \
+  --tests 'com.persons.finder.person.bio.remote.RemoteBioGeneratorLiveTest'
+```
+
 Create an ignored local database-password file. Compose mounts it as a secret
 and does not render its value into the resolved configuration:
 

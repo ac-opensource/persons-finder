@@ -43,7 +43,7 @@ class JdbcNearbyPersonRepositoryTest {
 
     @Test
     fun `nearby query is feature-owned and returns stable unrounded PostGIS results`() {
-        val first = create("Aroha", GeoPoint.from(-41.2865, 174.7762))
+        val first = create("Andrew", GeoPoint.from(-41.2865, 174.7762))
         val second = create("Tama", GeoPoint.from(-41.2865, 174.7762))
         create("Mere", GeoPoint.from(-36.8485, 174.7633))
 
@@ -57,7 +57,7 @@ class JdbcNearbyPersonRepositoryTest {
 
         assertEquals(listOf(first, second).sorted(), results.map(NearbyPerson::id))
         assertEquals(listOf(0.0, 0.0), results.map(NearbyPerson::distanceKm))
-        assertEquals(setOf("Aroha", "Tama"), results.map { it.profile.name }.toSet())
+        assertEquals(setOf("Andrew", "Tama"), results.map { it.profile.name }.toSet())
         assertEquals(2, results.map { it.bio }.filter(String::isNotBlank).size)
     }
 

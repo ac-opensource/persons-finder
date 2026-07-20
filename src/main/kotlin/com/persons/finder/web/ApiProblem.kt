@@ -54,9 +54,13 @@ enum class ProblemCode(
         status = 409,
         type = URI.create("urn:persons-finder:problem:idempotency-key-reused"),
     ),
-    BIO_INPUT_REJECTED(
+    UNSAFE_BIO_INPUT(
         status = 422,
-        type = URI.create("urn:persons-finder:problem:bio-input-rejected"),
+        type = URI.create("urn:persons-finder:problem:unsafe-bio-input"),
+    ),
+    BIO_GENERATION_INVALID(
+        status = 502,
+        type = URI.create("urn:persons-finder:problem:bio-generation-invalid"),
     ),
     BIO_GENERATION_UNAVAILABLE(
         status = 503,

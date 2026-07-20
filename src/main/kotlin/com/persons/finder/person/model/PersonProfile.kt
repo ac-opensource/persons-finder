@@ -27,6 +27,8 @@ class PersonProfile private constructor(
         const val MAX_JOB_TITLE_CODE_POINTS = 80
         const val MAX_HOBBY_CODE_POINTS = 60
         const val MAX_HOBBIES = 10
+        const val MAX_AGGREGATE_SOURCE_CODE_POINTS =
+            MAX_NAME_CODE_POINTS + MAX_JOB_TITLE_CODE_POINTS + (MAX_HOBBY_CODE_POINTS * MAX_HOBBIES)
 
         fun create(
             name: String,
@@ -68,6 +70,16 @@ class PersonProfile private constructor(
                         )
                     }
                     .distinct()
+            val aggregateCodePoints =
+                canonicalName.codePointCount() +
+                    canonicalJobTitle.codePointCount() +
+                    canonicalHobbies.sumOf(String::codePointCount)
+            if (aggregateCodePoints > MAX_AGGREGATE_SOURCE_CODE_POINTS) {
+                throw ProfileValidationException(
+                    ProfileValidationField.PROFILE,
+                    ProfileValidationReason.TOO_LONG,
+                )
+            }
 
             return PersonProfile(
                 name = canonicalName,
@@ -172,12 +184,20 @@ private fun String.trimUnicodeWhitespace(): String {
 private fun Int.isUnicodeWhitespace(): Boolean =
     Character.isWhitespace(this) || Character.isSpaceChar(this)
 
-private fun isForbiddenProfileCodePoint(codePoint: Int): Boolean =
-    when (Character.getType(codePoint)) {
+private fun isForbiddenProfileCodePoint(codePoint: Int): Boolean {
+    if (codePoint == ZERO_WIDTH_NON_JOINER || codePoint == ZERO_WIDTH_JOINER) {
+        return false
+    }
+    return when (Character.getType(codePoint)) {
         Character.CONTROL.toInt(),
+        Character.FORMAT.toInt(),
         Character.LINE_SEPARATOR.toInt(),
         Character.PARAGRAPH_SEPARATOR.toInt(),
         -> true
 
         else -> false
     }
+}
+
+private const val ZERO_WIDTH_NON_JOINER = 0x200C
+private const val ZERO_WIDTH_JOINER = 0x200D

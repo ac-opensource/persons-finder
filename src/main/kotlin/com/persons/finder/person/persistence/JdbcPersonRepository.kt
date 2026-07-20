@@ -37,7 +37,7 @@ class JdbcPersonRepository(
                     setString(2, person.profile.name)
                     setString(3, person.profile.jobTitle)
                     setArray(4, connection.createArrayOf("text", person.profile.hobbies.toTypedArray()))
-                    setString(5, person.bio)
+                    setString(5, person.bio.value)
                     setTimestamp(6, Timestamp.from(person.createdAt.toPostgresPrecision()))
                 }
             },

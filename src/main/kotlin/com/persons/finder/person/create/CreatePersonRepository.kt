@@ -1,5 +1,6 @@
 package com.persons.finder.person.create
 
+import com.persons.finder.person.bio.GeneratedBio
 import com.persons.finder.person.model.LastKnownLocationProjection
 import com.persons.finder.person.model.LocationObservation
 import com.persons.finder.person.model.PersonId
@@ -17,6 +18,6 @@ interface CreatePersonRepository {
 data class NewPerson(
     val id: PersonId,
     val profile: PersonProfile,
-    val bio: String,
+    val bio: GeneratedBio,
     val createdAt: Instant,
 )

@@ -1,5 +1,16 @@
 package com.persons.finder.person.create
 
+import com.persons.finder.person.bio.BioCompositionDoesNotFitException
+import com.persons.finder.person.bio.BIO_GENERATION_DEADLINE
+import com.persons.finder.person.bio.BioGenerationContext
+import com.persons.finder.person.bio.BioGenerationDeadlineExceededException
+import com.persons.finder.person.bio.BioGenerationFailure
+import com.persons.finder.person.bio.BioGenerationResult
+import com.persons.finder.person.bio.BioGenerator
+import com.persons.finder.person.bio.BioPolicy
+import com.persons.finder.person.bio.GeneratedBio
+import com.persons.finder.person.bio.GeneratedBioTemplate
+import com.persons.finder.person.bio.UnsafeBioInputException
 import com.persons.finder.person.model.GeoPoint
 import com.persons.finder.person.model.LastKnownLocationProjection
 import com.persons.finder.person.model.LocationObservation
@@ -10,6 +21,7 @@ import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionOperations
 import java.time.Clock
 import java.time.Instant
+import java.util.concurrent.CancellationException
 
 data class CreatePersonCommand(
     val profile: PersonProfile,
@@ -21,15 +33,17 @@ sealed interface CreatePersonOutcome {
 
     data object BioCompositionDoesNotFit : CreatePersonOutcome
 
-    data object BioInputRejected : CreatePersonOutcome
+    data object UnsafeBioInput : CreatePersonOutcome
 
-    data object BioGenerationUnavailable : CreatePersonOutcome
+    data class BioGenerationInvalid(val reason: BioGenerationFailure) : CreatePersonOutcome
+
+    data class BioGenerationUnavailable(val reason: BioGenerationFailure) : CreatePersonOutcome
 }
 
 data class CreatePersonResult(
     val id: PersonId,
     val profile: PersonProfile,
-    val bio: String,
+    val bio: GeneratedBio,
     val createdAt: Instant,
     val lastKnownLocationAt: Instant,
 )
@@ -49,25 +63,42 @@ class CreatePersonService(
             } catch (_: BioCompositionDoesNotFitException) {
                 return CreatePersonOutcome.BioCompositionDoesNotFit
             } catch (_: UnsafeBioInputException) {
-                return CreatePersonOutcome.BioInputRejected
+                return CreatePersonOutcome.UnsafeBioInput
             }
 
+        val generationContext = BioGenerationContext.start(BIO_GENERATION_DEADLINE)
         val generated =
             try {
-                bioGenerator.generate(prepared.request)
+                bioGenerator.generate(prepared.request, generationContext)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: RuntimeException) {
-                return CreatePersonOutcome.BioGenerationUnavailable
+                return BioGenerationFailure.UNAVAILABLE.toCreateOutcome()
             }
         val template =
             when (generated) {
-                is BioGenerationResult.Template -> generated.value
-                is BioGenerationResult.Failure -> return CreatePersonOutcome.BioGenerationUnavailable
+                is BioGenerationResult.Template ->
+                    when (val revalidated = GeneratedBioTemplate.validate(generated.value.value)) {
+                        is BioGenerationResult.Template -> revalidated.value
+                        is BioGenerationResult.Failure ->
+                            return revalidated.reason.toCreateOutcome()
+                    }
+
+                is BioGenerationResult.Failure ->
+                    return generated.reason.toCreateOutcome()
             }
+        try {
+            generationContext.requireRemaining()
+        } catch (_: BioGenerationDeadlineExceededException) {
+            return BioGenerationFailure.TIMEOUT.toCreateOutcome()
+        }
         val bio =
             try {
                 bioPolicy.compose(template, command.profile, prepared.selectedHobby)
+            } catch (cancelled: CancellationException) {
+                throw cancelled
             } catch (_: IllegalArgumentException) {
-                return CreatePersonOutcome.BioGenerationUnavailable
+                return BioGenerationFailure.INVALID_OUTPUT.toCreateOutcome()
             }
 
         val recordedAt = clock.instant()
@@ -104,3 +135,19 @@ class CreatePersonService(
         )
     }
 }
+
+/**
+ * The application-owned mapping from normalized generator failures to use-case
+ * outcomes. HTTP adapters never inspect provider-specific failures.
+ */
+private fun BioGenerationFailure.toCreateOutcome(): CreatePersonOutcome =
+    when (this) {
+        BioGenerationFailure.INVALID_OUTPUT,
+        BioGenerationFailure.POLICY_REJECTED,
+        -> CreatePersonOutcome.BioGenerationInvalid(this)
+
+        BioGenerationFailure.TIMEOUT,
+        BioGenerationFailure.RATE_LIMITED,
+        BioGenerationFailure.UNAVAILABLE,
+        -> CreatePersonOutcome.BioGenerationUnavailable(this)
+    }

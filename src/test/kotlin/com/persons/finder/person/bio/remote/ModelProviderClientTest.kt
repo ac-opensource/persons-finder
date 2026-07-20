@@ -1,0 +1,529 @@
+package com.persons.finder.person.bio.remote
+
+import com.persons.finder.person.bio.BioGenerationContext
+import com.persons.finder.person.bio.BioGenerationFailure
+import com.persons.finder.person.bio.BioGenerationResult
+import com.persons.finder.person.bio.BioTemplateId
+import com.persons.finder.person.bio.BioTemplateRequest
+import com.persons.finder.person.bio.GeneratedBioTemplate
+import com.persons.finder.person.bio.SafeInterestCode
+import com.persons.finder.person.bio.SafeJobCode
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertFalse
+import org.junit.jupiter.api.Assertions.assertThrows
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import java.net.http.HttpTimeoutException
+import java.time.Duration
+import java.util.concurrent.CancellationException
+import kotlin.reflect.full.memberProperties
+import tools.jackson.databind.json.JsonMapper
+
+class ModelProviderClientTest {
+    private val objectMapper = JsonMapper.builder().build()
+    private val request =
+        ModelGenerationRequest(
+            instructions = "Generate a safe template.",
+            inputJson = """{"job_category":"technology_engineering"}""",
+            outputSchemaJson =
+                """{"type":"object","properties":{"template_id":{"type":"string","enum":["quirky_side_quest"]}},"required":["template_id"],"additionalProperties":false}""",
+            maxOutputTokens = 256,
+        )
+
+    @Test
+    fun `OpenAI client uses Responses structured output without putting credential in body`() {
+        val transport =
+            RecordingTransport(
+                ProviderHttpResponse(
+                    200,
+                    """
+                    {
+                      "status": "completed",
+                      "output": [{
+                        "type": "message",
+                        "content": [{
+                          "type": "output_text",
+                          "text": "{\"template_id\":\"quirky_side_quest\"}"
+                        }]
+                      }]
+                    }
+                    """.trimIndent(),
+                ),
+            )
+        val result =
+            OpenAiModelProviderClient(
+                apiKey = "openai-test-credential",
+                model = "test-model",
+                timeout = Duration.ofSeconds(7),
+                objectMapper = objectMapper,
+                transport = transport,
+            ).generate(request)
+
+        assertEquals(
+            ModelProviderResult.Generated(
+                """{"template_id":"quirky_side_quest"}""",
+            ),
+            result,
+        )
+        val sent = requireNotNull(transport.request)
+        assertEquals("POST", sent.method)
+        assertEquals("https://api.openai.com/v1/responses", sent.uri.toString())
+        assertEquals(null, sent.uri.query)
+        assertEquals(setOf("Authorization", "Content-Type"), sent.headers.keys)
+        assertEquals("Bearer openai-test-credential", sent.headers["Authorization"])
+        assertEquals(Duration.ofSeconds(7), sent.timeout)
+        assertFalse(sent.body.contains("openai-test-credential"))
+        val body = objectMapper.readTree(sent.body)
+        assertEquals(
+            setOf("model", "instructions", "input", "store", "max_output_tokens", "text"),
+            body.propertyNames().toSet(),
+        )
+        assertEquals("test-model", body.path("model").stringValue())
+        assertEquals(request.inputJson, body.path("input").stringValue())
+        assertFalse(body.path("store").asBoolean())
+        assertEquals(256, body.path("max_output_tokens").asInt())
+        assertEquals("json_schema", body.path("text").path("format").path("type").stringValue())
+        assertTrue(body.path("text").path("format").path("strict").asBoolean())
+        assertFalse(
+            body.path("text").path("format").path("schema")
+                .path("additionalProperties")
+                .asBoolean(),
+        )
+    }
+
+    @Test
+    fun `Gemini client uses generateContent structured output without putting credential in body`() {
+        val transport =
+            RecordingTransport(
+                ProviderHttpResponse(
+                    200,
+                    """
+                    {
+                      "candidates": [{
+                        "finishReason": "STOP",
+                        "content": {
+                          "parts": [{
+                            "text": "{\"template_id\":\"quirky_side_quest\"}"
+                          }]
+                        }
+                      }]
+                    }
+                    """.trimIndent(),
+                ),
+            )
+        val result =
+            GeminiModelProviderClient(
+                apiKey = "gemini-test-credential",
+                model = "gemini/test model",
+                timeout = Duration.ofSeconds(8),
+                objectMapper = objectMapper,
+                transport = transport,
+            ).generate(request)
+
+        assertEquals(
+            ModelProviderResult.Generated(
+                """{"template_id":"quirky_side_quest"}""",
+            ),
+            result,
+        )
+        val sent = requireNotNull(transport.request)
+        assertEquals("POST", sent.method)
+        assertEquals(
+            "https://generativelanguage.googleapis.com/v1beta/models/gemini%2Ftest%20model:generateContent",
+            sent.uri.toString(),
+        )
+        assertEquals(null, sent.uri.query)
+        assertEquals(setOf("x-goog-api-key", "Content-Type"), sent.headers.keys)
+        assertEquals("gemini-test-credential", sent.headers["x-goog-api-key"])
+        assertEquals(Duration.ofSeconds(8), sent.timeout)
+        assertFalse(sent.body.contains("gemini-test-credential"))
+        val body = objectMapper.readTree(sent.body)
+        assertEquals(
+            setOf("systemInstruction", "contents", "generationConfig"),
+            body.propertyNames().toSet(),
+        )
+        assertEquals(
+            request.instructions,
+            body.path("systemInstruction").path("parts").path(0).path("text").stringValue(),
+        )
+        assertEquals(
+            request.inputJson,
+            body.path("contents").path(0).path("parts").path(0).path("text").stringValue(),
+        )
+        assertEquals(
+            "application/json",
+            body.path("generationConfig").path("responseMimeType").stringValue(),
+        )
+        assertFalse(
+            body.path("generationConfig").path("responseJsonSchema")
+                .path("additionalProperties")
+                .asBoolean(),
+        )
+    }
+
+    @Test
+    fun `Anthropic client uses Messages structured output without putting credential in body`() {
+        val transport =
+            RecordingTransport(
+                ProviderHttpResponse(
+                    200,
+                    """
+                    {
+                      "type": "message",
+                      "role": "assistant",
+                      "stop_reason": "end_turn",
+                      "content": [{
+                        "type": "text",
+                        "text": "{\"template_id\":\"quirky_side_quest\"}"
+                      }]
+                    }
+                    """.trimIndent(),
+                ),
+            )
+        val result =
+            AnthropicModelProviderClient(
+                apiKey = "anthropic-test-credential",
+                model = "test-model",
+                timeout = Duration.ofSeconds(9),
+                objectMapper = objectMapper,
+                transport = transport,
+            ).generate(request)
+
+        assertEquals(
+            ModelProviderResult.Generated(
+                """{"template_id":"quirky_side_quest"}""",
+            ),
+            result,
+        )
+        val sent = requireNotNull(transport.request)
+        assertEquals("POST", sent.method)
+        assertEquals("https://api.anthropic.com/v1/messages", sent.uri.toString())
+        assertEquals(null, sent.uri.query)
+        assertEquals(setOf("x-api-key", "anthropic-version", "Content-Type"), sent.headers.keys)
+        assertEquals("anthropic-test-credential", sent.headers["x-api-key"])
+        assertEquals("2023-06-01", sent.headers["anthropic-version"])
+        assertEquals(Duration.ofSeconds(9), sent.timeout)
+        assertFalse(sent.body.contains("anthropic-test-credential"))
+        val body = objectMapper.readTree(sent.body)
+        assertEquals(
+            setOf("model", "max_tokens", "system", "messages", "output_config"),
+            body.propertyNames().toSet(),
+        )
+        assertEquals("test-model", body.path("model").stringValue())
+        assertEquals(256, body.path("max_tokens").asInt())
+        assertEquals(request.instructions, body.path("system").stringValue())
+        assertEquals(
+            request.inputJson,
+            body.path("messages").path(0).path("content").stringValue(),
+        )
+        assertEquals(
+            "json_schema",
+            body.path("output_config").path("format").path("type").stringValue(),
+        )
+        assertFalse(
+            body.path("output_config").path("format").path("schema")
+                .path("additionalProperties")
+                .asBoolean(),
+        )
+    }
+
+    @Test
+    fun `provider clients classify timeout rate limit refusal and safety without exposing payloads`() {
+        val timeoutTransport =
+            ProviderHttpTransport {
+                throw HttpTimeoutException("timed out")
+            }
+        assertEquals(
+            ModelProviderResult.Failure(BioGenerationFailure.TIMEOUT),
+            openAiClient(timeoutTransport).generate(request),
+        )
+
+        assertEquals(
+            ModelProviderResult.Failure(BioGenerationFailure.RATE_LIMITED),
+            openAiClient(ProviderHttpTransport { ProviderHttpResponse(429, "provider detail") })
+                .generate(request),
+        )
+        assertEquals(
+            ModelProviderResult.Failure(BioGenerationFailure.POLICY_REJECTED),
+            openAiClient(
+                ProviderHttpTransport {
+                    ProviderHttpResponse(
+                        200,
+                        """{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"not allowed"}]}]}""",
+                    )
+                },
+            ).generate(request),
+        )
+        assertEquals(
+            ModelProviderResult.Failure(BioGenerationFailure.POLICY_REJECTED),
+            geminiClient(
+                ProviderHttpTransport {
+                    ProviderHttpResponse(
+                        200,
+                        """{"promptFeedback":{"blockReason":"SAFETY"}}""",
+                    )
+                },
+            ).generate(request),
+        )
+        assertEquals(
+            ModelProviderResult.Failure(BioGenerationFailure.POLICY_REJECTED),
+            anthropicClient(
+                ProviderHttpTransport {
+                    ProviderHttpResponse(
+                        200,
+                        """{"type":"message","role":"assistant","stop_reason":"refusal","content":[{"type":"text","text":"not allowed"}]}""",
+                    )
+                },
+            ).generate(request),
+        )
+        assertEquals(
+            ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
+            anthropicClient(
+                ProviderHttpTransport {
+                    ProviderHttpResponse(
+                        200,
+                        """{"type":"message","role":"assistant","stop_reason":"max_tokens","content":[]}""",
+                    )
+                },
+            ).generate(request),
+        )
+
+        listOf(
+            openAiClient(oversizedTransport()),
+            geminiClient(oversizedTransport()),
+            anthropicClient(oversizedTransport()),
+        ).forEach { client ->
+            assertEquals(
+                ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
+                client.generate(request),
+            )
+        }
+    }
+
+    @Test
+    fun `transport request and response diagnostics omit headers and bodies`() {
+        val providerRequest =
+            ProviderHttpRequest(
+                uri = java.net.URI.create("https://example.test"),
+                headers = mapOf("Authorization" to "Bearer secret"),
+                body = "customer payload",
+                timeout = Duration.ofSeconds(2),
+            )
+        val providerResponse = ProviderHttpResponse(200, "generated content")
+
+        assertFalse(providerRequest.toString().contains("secret"))
+        assertFalse(providerRequest.toString().contains("customer payload"))
+        assertFalse(providerResponse.toString().contains("generated content"))
+        assertEquals(
+            setOf("method", "uri", "headers", "body", "timeout"),
+            ProviderHttpRequest::class.memberProperties.map { it.name }.toSet(),
+        )
+    }
+
+    @Test
+    fun `application generator diagnostics contain metadata only`() {
+        val canonicalRequest =
+            BioTemplateRequest(
+                jobCategory = SafeJobCode.TECHNOLOGY_ENGINEERING,
+                interests = listOf(SafeInterestCode.OUTDOORS_NATURE),
+            )
+        val providerRequest =
+            ModelGenerationRequest(
+                instructions = "synthetic secret prompt",
+                inputJson = """{"synthetic":"customer context"}""",
+                outputSchemaJson = """{"synthetic":"schema"}""",
+                maxOutputTokens = 64,
+            )
+        val providerResult = ModelProviderResult.Generated("synthetic provider output")
+        val applicationResult =
+            BioGenerationResult.Template(
+                GeneratedBioTemplate.fromCatalog(BioTemplateId.QUIRKY_SIDE_QUEST),
+            )
+
+        val diagnostics =
+            listOf(
+                canonicalRequest.toString(),
+                providerRequest.toString(),
+                providerResult.toString(),
+                applicationResult.toString(),
+            ).joinToString()
+        listOf(
+            "{{NAME}}",
+            "en-NZ",
+            "technology_engineering",
+            "outdoors_nature",
+            "synthetic secret prompt",
+            "customer context",
+            "synthetic provider output",
+            "{{JOB}}",
+            "{{HOBBY}}",
+        ).forEach { forbidden ->
+            assertFalse(diagnostics.contains(forbidden), forbidden)
+        }
+    }
+
+    @Test
+    fun `complete adapter envelopes have no customer correlation tracing baggage tools or telemetry fields`() {
+        val sentRequests =
+            listOf(
+                RecordingTransport(validOpenAiResponse()).also { openAiClient(it).generate(request) },
+                RecordingTransport(validGeminiResponse()).also { geminiClient(it).generate(request) },
+                RecordingTransport(validAnthropicResponse()).also { anthropicClient(it).generate(request) },
+            ).map { requireNotNull(it.request) }
+
+        sentRequests.forEach { sent ->
+            val completeEnvelope =
+                listOf(
+                    sent.method,
+                    sent.uri.toString(),
+                    sent.headers.entries.joinToString(),
+                    sent.body,
+                ).joinToString("|")
+            listOf(
+                "request_id",
+                "request-id",
+                "idempotency",
+                "traceparent",
+                "tracestate",
+                "baggage",
+                "session",
+                "user_id",
+                "person_id",
+                "metadata",
+                "telemetry",
+                "tools",
+                "tool_choice",
+                "previous_response_id",
+            ).forEach { forbidden ->
+                assertFalse(completeEnvelope.contains(forbidden, ignoreCase = true), forbidden)
+            }
+        }
+        val openAiBody = objectMapper.readTree(sentRequests[0].body)
+        assertFalse(openAiBody.path("store").asBoolean())
+        assertFalse(sentRequests[1].body.contains("cachedContent"))
+        assertFalse(sentRequests[2].body.contains("metadata"))
+    }
+
+    @Test
+    fun `deadline clamps adapter timeout and expiry causes no transport call`() {
+        var now = 100L
+        val context = BioGenerationContext.start(Duration.ofSeconds(2)) { now }
+        val requestWithDeadline =
+            request.copyWithContext(context)
+        val recording = RecordingTransport(validOpenAiResponse())
+        openAiClient(recording).generate(requestWithDeadline)
+        assertEquals(Duration.ofSeconds(2), requireNotNull(recording.request).timeout)
+
+        now += Duration.ofSeconds(2).toNanos()
+        val neverCalled =
+            RecordingTransport(validOpenAiResponse())
+        assertEquals(
+            ModelProviderResult.Failure(BioGenerationFailure.TIMEOUT),
+            openAiClient(neverCalled).generate(requestWithDeadline),
+        )
+        assertEquals(null, neverCalled.request)
+    }
+
+    @Test
+    fun `cancellation propagates and is never normalized or retried`() {
+        var invocations = 0
+        val cancelling =
+            ProviderHttpTransport {
+                invocations++
+                throw CancellationException("synthetic cancellation")
+            }
+
+        assertThrows(CancellationException::class.java) {
+            openAiClient(cancelling).generate(request)
+        }
+        assertEquals(1, invocations)
+    }
+
+    @Test
+    fun `malformed truncated and wrapper-invalid success responses normalize to invalid output`() {
+        listOf(
+            openAiClient(ProviderHttpTransport { ProviderHttpResponse(200, "{") }),
+            geminiClient(ProviderHttpTransport { ProviderHttpResponse(200, "{") }),
+            anthropicClient(ProviderHttpTransport { ProviderHttpResponse(200, "{") }),
+        ).forEach { client ->
+            assertEquals(
+                ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
+                client.generate(request),
+            )
+        }
+    }
+
+    private fun ModelGenerationRequest.copyWithContext(context: BioGenerationContext) =
+        ModelGenerationRequest(
+            instructions = instructions,
+            inputJson = inputJson,
+            outputSchemaJson = outputSchemaJson,
+            maxOutputTokens = maxOutputTokens,
+            context = context,
+        )
+
+    private fun validOpenAiResponse() =
+        ProviderHttpResponse(
+            200,
+            """{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"template_id\":\"quirky_side_quest\"}"}]}]}""",
+        )
+
+    private fun validGeminiResponse() =
+        ProviderHttpResponse(
+            200,
+            """{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"template_id\":\"quirky_side_quest\"}"}]}}]}""",
+        )
+
+    private fun validAnthropicResponse() =
+        ProviderHttpResponse(
+            200,
+            """{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"{\"template_id\":\"quirky_side_quest\"}"}]}""",
+        )
+
+    private fun openAiClient(transport: ProviderHttpTransport) =
+        OpenAiModelProviderClient(
+            apiKey = "openai-test-credential",
+            model = "test-model",
+            timeout = Duration.ofSeconds(5),
+            objectMapper = objectMapper,
+            transport = transport,
+        )
+
+    private fun geminiClient(transport: ProviderHttpTransport) =
+        GeminiModelProviderClient(
+            apiKey = "gemini-test-credential",
+            model = "test-model",
+            timeout = Duration.ofSeconds(5),
+            objectMapper = objectMapper,
+            transport = transport,
+        )
+
+    private fun anthropicClient(transport: ProviderHttpTransport) =
+        AnthropicModelProviderClient(
+            apiKey = "anthropic-test-credential",
+            model = "test-model",
+            timeout = Duration.ofSeconds(5),
+            objectMapper = objectMapper,
+            transport = transport,
+        )
+
+    private fun oversizedTransport() =
+        ProviderHttpTransport {
+            ProviderHttpResponse(
+                statusCode = 200,
+                body = "",
+                bodyTooLarge = true,
+            )
+        }
+
+    private class RecordingTransport(
+        private val response: ProviderHttpResponse,
+    ) : ProviderHttpTransport {
+        var request: ProviderHttpRequest? = null
+
+        override fun send(request: ProviderHttpRequest): ProviderHttpResponse {
+            this.request = request
+            return response
+        }
+    }
+}

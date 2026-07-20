@@ -9,12 +9,12 @@ class PersonModelTest {
     fun `profile canonicalizes and deduplicates hobbies in first-input order`() {
         val profile =
             PersonProfile.create(
-                name = "  Aroha  ",
+                name = "  Andrew  ",
                 jobTitle = "Software engineer",
                 hobbies = listOf("hiking", "hiking", "espresso"),
             )
 
-        assertEquals("Aroha", profile.name)
+        assertEquals("Andrew", profile.name)
         assertEquals(listOf("hiking", "espresso"), profile.hobbies)
     }
 
@@ -34,13 +34,43 @@ class PersonModelTest {
         val missing =
             assertThrows(ProfileValidationException::class.java) {
                 PersonProfile.create(
-                    name = "Aroha",
+                    name = "Andrew",
                     jobTitle = "Engineer",
                     hobbies = emptyList(),
                 )
             }
         assertEquals(ProfileValidationField.HOBBIES, missing.field)
         assertEquals(ProfileValidationReason.REQUIRED, missing.reason)
+    }
+
+    @Test
+    fun `profile rejects deceptive format controls while preserving joiners`() {
+        listOf(
+            "\u200B", // zero-width space
+            "\u202E", // right-to-left override
+            "\u2066", // left-to-right isolate
+            "\uFEFF", // zero-width no-break space / BOM
+        ).forEach { formatControl ->
+            val failure =
+                assertThrows(ProfileValidationException::class.java) {
+                    PersonProfile.create(
+                        name = "Andrew",
+                        jobTitle = "Engineer",
+                        hobbies = listOf("hiking${formatControl}club"),
+                    )
+                }
+
+            assertEquals(ProfileValidationField.PROFILE, failure.field)
+            assertEquals(ProfileValidationReason.INVALID_FORMAT, failure.reason)
+        }
+
+        val profile =
+            PersonProfile.create(
+                name = "Andrew",
+                jobTitle = "Engineer",
+                hobbies = listOf("emoji 👨‍💻", "می‌خواهم"),
+            )
+        assertEquals(listOf("emoji 👨‍💻", "می‌خواهم"), profile.hobbies)
     }
 
     @Test
