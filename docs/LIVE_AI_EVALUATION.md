@@ -231,12 +231,15 @@ copy that exact archived JSON to `docs/evidence/live-ai/` with the provider,
 full code revision, and run kind in the filename. Commit only that reviewed
 JSON, never Gradle HTML/JUnit output or raw provider content.
 
-Aggregate report schema version 4, with the live execution/evidence extension,
-contains:
+The current harness emits aggregate report schema version 5. With the live
+execution/evidence extension, it contains:
 
 - provider, exact model ID, clean Git revision, corpus version and hash;
 - derived prompt and output-schema hashes;
 - the application-owned maximum output-token setting;
+- the 512 model-authored, 220 maximum-source, and 732 final-grounded
+  code-point limits;
+- the explicit `maximum_approved_source_lengths_v1` grounding strategy;
 - pacing strategy and configured minimum call interval in provenance;
 - configured minimum first-to-last attempt-start span in provenance;
 - pacing wait-event count and actual wait nanoseconds in a top-level `pacing`
@@ -253,7 +256,13 @@ contains:
 - one-sided 95% Wilson upper failure bounds;
 - latency p50, p95, and maximum;
 - valid-prose, distinct-valid-prose, and deterministic-catalog-match counts,
-  with only aggregate counts retained;
+  with only those aggregate counts serialized; prose and individual
+  fingerprints are not retained;
+- one content-free record per completed attempt containing only its sequence,
+  safe corpus case ID, normalized result, and final grounded code-point count
+  when valid;
+- per-case, per-slice, and overall grounded-length measurement counts, maxima,
+  and valid-result missing-measurement counts;
 - provider HTTP status classes, closed response/finish/incomplete categories,
   closed error code/type/parameter and terminal-failure categories, response
   byte sizes and transport latency, allowlisted scalar rate-limit/retry/provider
@@ -265,6 +274,13 @@ contains:
 - output-text item counts and byte/code-point sizes without the output text;
 - sanitized hard-boundary and harness-error counts; and
 - the boolean synthetic retention/data-use approval that authorized the run.
+
+The tracked paid aggregate reports below remain unchanged schema-version-4
+evidence and were not backfilled. They do not contain grounded-length fields;
+their absence means unknown, not zero. Version 5 measures the already required
+composition against synthetic strings at the maximum approved source lengths;
+these numbers are structural worst-case measurements, not customer profile
+lengths.
 
 Smoke report schema version 2 adds its fixed-fixture hash,
 planned/attempted/not-attempted
@@ -313,8 +329,10 @@ returned three valid distinct bios. A separate one-repetition 12-case
 calibration returned 12 valid distinct bios and no deterministic-catalog
 matches. Across those 15 successful calls, reported reasoning tokens were zero;
 the maximum output was 58 tokens, maximum authored length was 188 code points,
-maximum grounded length was 243 code points, and maximum sentence count was
-two. All request-boundary, canonical-schema, OpenAI placeholder-pattern,
+and maximum sentence count was two. The three-call smoke additionally recorded
+a maximum grounded length of 243 code points; the historical schema-version-4
+aggregate did not record grounded lengths. All request-boundary,
+canonical-schema, OpenAI placeholder-pattern,
 response-envelope, and evidence-completeness checks passed with no retry,
 top-up, pacing wait, or harness failure.
 
@@ -327,9 +345,10 @@ stop configuration. All 15 responses were HTTP 200 `completed`; there was no
 refusal, safety result, malformed envelope, transport failure, boundary
 violation, harness error, retry, top-up, or pacing wait. The final runs reported
 3,756 input and 733 output tokens, zero cached/reasoning/tool tokens, a maximum
-of 56 output tokens, 167 authored code points, 202 final grounded code points,
-and two sentences. Aggregate latency was 1.480 seconds at p50 and 5.591 seconds
-at p95/max.
+of 56 output tokens, 167 authored code points, and two sentences. The three-call
+smoke additionally recorded a maximum final grounded length of 202 code points;
+the historical schema-version-4 aggregate did not record grounded lengths.
+Aggregate latency was 1.480 seconds at p50 and 5.591 seconds at p95/max.
 
 Across all five reports, 33 provider calls reported 8,280 input and 1,654 output
 tokens. At the [published model rates used for the runs](https://developers.openai.com/api/docs/pricing),

@@ -46,9 +46,16 @@ class LiveBioEvalRunnerTest {
             )
 
         assertEquals(24, calls)
-        assertEquals(4, report.reportSchemaVersion)
+        assertEquals(5, report.reportSchemaVersion)
         assertEquals(24, report.provenance.plannedCalls)
         assertEquals(1_024, report.provenance.maxOutputTokens)
+        assertEquals(512, report.provenance.modelAuthoredCodePointLimit)
+        assertEquals(220, report.provenance.maximumGroundingSourceCodePoints)
+        assertEquals(732, report.provenance.finalGroundedCodePointLimit)
+        assertEquals(
+            "maximum_approved_source_lengths_v1",
+            report.provenance.groundingStrategy,
+        )
         assertEquals("minimum_attempt_start_interval_v1", report.provenance.pacingStrategy)
         assertEquals(0L, report.provenance.minimumCallIntervalMillis)
         assertEquals(0L, report.provenance.configuredMinimumCallStartSpanMillis)
@@ -57,6 +64,9 @@ class LiveBioEvalRunnerTest {
         assertEquals(24, report.overall.validProseCount)
         assertEquals(24, report.overall.distinctValidProseCount)
         assertEquals(0, report.overall.deterministicCatalogMatchCount)
+        assertEquals(24, report.overall.finalGroundedSizeReportedCount)
+        assertEquals(252, report.overall.maximumFinalGroundedCodePoints)
+        assertEquals(0, report.overall.validResultsWithoutGroundedMeasurement)
         assertEquals(0, report.overall.failureCount)
         assertEquals(0.0, report.overall.observedFailureRate)
         assertTrue(report.overall.oneSided95WilsonUpperFailureBound > 0.0)
@@ -77,6 +87,21 @@ class LiveBioEvalRunnerTest {
             report.byCase.keys,
         )
         assertTrue(report.byCase.values.all { metrics -> metrics.attempts == 2 })
+        assertEquals(
+            (1..24).toList(),
+            report.attemptEvidence.map(BioEvalAttemptEvidence::attemptIndex),
+        )
+        assertEquals(
+            corpus.cases.map(BioEvalCase::id) +
+                (corpus.cases.drop(1) + corpus.cases.take(1)).map(BioEvalCase::id),
+            report.attemptEvidence.map(BioEvalAttemptEvidence::caseId),
+        )
+        assertTrue(
+            report.attemptEvidence.all { evidence ->
+                evidence.outcome == BioEvalOutcome.VALID_PROSE &&
+                    evidence.finalGroundedCodePoints != null
+            },
+        )
     }
 
     @Test
@@ -142,7 +167,11 @@ class LiveBioEvalRunnerTest {
         )
 
         val sanitized = report.toSanitizedMap()
-        assertEquals(4, sanitized["report_schema_version"])
+        assertEquals(5, sanitized["report_schema_version"])
+        assertEquals(
+            "sanitized_metrics_no_request_or_response_content",
+            sanitized["data_policy"],
+        )
         val sanitizedProvenance = sanitized.getValue("provenance") as Map<*, *>
         assertEquals(
             "minimum_attempt_start_interval_v1",
@@ -150,6 +179,13 @@ class LiveBioEvalRunnerTest {
         )
         assertEquals(6_000L, sanitizedProvenance["minimum_call_interval_millis"])
         assertEquals(1_024, sanitizedProvenance["max_output_tokens"])
+        assertEquals(512, sanitizedProvenance["model_authored_code_point_limit"])
+        assertEquals(220, sanitizedProvenance["maximum_grounding_source_code_points"])
+        assertEquals(732, sanitizedProvenance["final_grounded_code_point_limit"])
+        assertEquals(
+            "maximum_approved_source_lengths_v1",
+            sanitizedProvenance["grounding_strategy"],
+        )
         assertEquals(
             6_000L * (corpus.cases.size - 1),
             sanitizedProvenance["configured_minimum_call_start_span_millis"],
@@ -160,6 +196,22 @@ class LiveBioEvalRunnerTest {
             Duration.ofSeconds(5).toNanos() * (corpus.cases.size - 1),
             sanitizedPacing["actual_wait_nanos"],
         )
+        val sanitizedAttempts = sanitized.getValue("attempt_evidence") as List<*>
+        assertEquals(corpus.cases.size, sanitizedAttempts.size)
+        val firstAttempt = sanitizedAttempts.first() as Map<*, *>
+        assertEquals(
+            setOf(
+                "attempt_index",
+                "case_id",
+                "normalized_result",
+                "final_grounded_code_points",
+            ),
+            firstAttempt.keys,
+        )
+        assertEquals(1, firstAttempt["attempt_index"])
+        assertEquals(corpus.cases.first().id, firstAttempt["case_id"])
+        assertEquals("valid_prose", firstAttempt["normalized_result"])
+        assertTrue((firstAttempt["final_grounded_code_points"] as Int) > 0)
     }
 
     @Test
@@ -200,7 +252,22 @@ class LiveBioEvalRunnerTest {
         assertEquals(1, report.overall.resultCounts[BioEvalOutcome.INVALID_OUTPUT])
         assertEquals(1, report.overall.resultCounts[BioEvalOutcome.POLICY_REJECTED])
         assertEquals(corpus.cases.size - sequence.size, report.overall.validProseCount)
+        assertEquals(
+            corpus.cases.size - sequence.size,
+            report.overall.finalGroundedSizeReportedCount,
+        )
+        assertEquals(0, report.overall.validResultsWithoutGroundedMeasurement)
         assertEquals(sequence.size, report.overall.failureCount)
+        assertTrue(
+            report.attemptEvidence.take(sequence.size).all { evidence ->
+                evidence.finalGroundedCodePoints == null
+            },
+        )
+        assertTrue(
+            report.attemptEvidence.drop(sequence.size).all { evidence ->
+                evidence.finalGroundedCodePoints != null
+            },
+        )
         assertEquals(
             1,
             report.byCase.getValue("case-001")
@@ -266,6 +333,14 @@ class LiveBioEvalRunnerTest {
                 generator = generator,
                 afterAttempt = { report ->
                     checkpointAttempts += report.overall.attempts
+                    assertEquals(
+                        report.overall.validProseCount,
+                        report.overall.finalGroundedSizeReportedCount,
+                    )
+                    assertEquals(
+                        report.overall.attempts,
+                        report.attemptEvidence.size,
+                    )
                     assertFalse(
                         report.toSanitizedMap().toString()
                             .contains("RAW-SECRET-CANCELLATION-CONTENT"),
@@ -304,6 +379,10 @@ class LiveBioEvalRunnerTest {
                     ),
             )
         assertEquals(24, plan.plannedCalls)
+        assertEquals(512, plan.modelAuthoredCodePointLimit)
+        assertEquals(220, plan.maximumGroundingSourceCodePoints)
+        assertEquals(732, plan.finalGroundedCodePointLimit)
+        assertEquals("maximum_approved_source_lengths_v1", plan.groundingStrategy)
         assertEquals("minimum_attempt_start_interval_v1", plan.pacingStrategy)
         assertEquals(6_000L, plan.minimumCallIntervalMillis)
         assertEquals(138_000L, plan.configuredMinimumCallStartSpanMillis)
@@ -354,15 +433,19 @@ class LiveBioEvalRunnerTest {
         assertEquals(1, report.overall.resultCounts[BioEvalOutcome.VALID_PROSE])
         assertEquals(1, report.overall.resultCounts[BioEvalOutcome.HARNESS_ERROR])
         assertEquals(1, report.overall.validProseCount)
+        assertEquals(1, report.overall.finalGroundedSizeReportedCount)
+        assertEquals(0, report.overall.validResultsWithoutGroundedMeasurement)
         assertEquals(1, report.overall.distinctValidProseCount)
         assertEquals(0, report.overall.deterministicCatalogMatchCount)
         assertEquals(2, calls)
         assertEquals(2, report.overall.attempts)
+        assertTrue(report.attemptEvidence[0].finalGroundedCodePoints != null)
+        assertEquals(null, report.attemptEvidence[1].finalGroundedCodePoints)
         assertFalse(sanitizedReport.contains("RAW-SECRET-PROVIDER-CONTENT"))
         assertFalse(sanitizedReport.contains("technology_engineering"))
         assertFalse(sanitizedReport.contains("{{NAME}}"))
         assertTrue(
-            sanitizedReport.contains("aggregate_only_no_request_or_response_content"),
+            sanitizedReport.contains("sanitized_metrics_no_request_or_response_content"),
         )
     }
 

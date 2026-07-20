@@ -17,6 +17,9 @@ internal data class BioEvalMetrics(
     val validProseCount: Int,
     val distinctValidProseCount: Int,
     val deterministicCatalogMatchCount: Int,
+    val finalGroundedSizeReportedCount: Int,
+    val maximumFinalGroundedCodePoints: Int,
+    val validResultsWithoutGroundedMeasurement: Int,
     val failureCount: Int,
     val observedFailureRate: Double,
     val oneSided95WilsonUpperFailureBound: Double,
@@ -28,6 +31,16 @@ internal data class BioEvalMetrics(
         require(validProseCount + failureCount == attempts)
         require(distinctValidProseCount in 0..validProseCount)
         require(deterministicCatalogMatchCount in 0..validProseCount)
+        require(finalGroundedSizeReportedCount in 0..validProseCount)
+        require(
+            finalGroundedSizeReportedCount + validResultsWithoutGroundedMeasurement ==
+                validProseCount,
+        )
+        require(maximumFinalGroundedCodePoints >= 0)
+        require(
+            (finalGroundedSizeReportedCount == 0) ==
+                (maximumFinalGroundedCodePoints == 0),
+        )
         require(resultCounts.values.sum() == attempts)
     }
 
@@ -37,6 +50,10 @@ internal data class BioEvalMetrics(
             "valid_prose_count" to validProseCount,
             "distinct_valid_prose_count" to distinctValidProseCount,
             "deterministic_catalog_match_count" to deterministicCatalogMatchCount,
+            "final_grounded_size_reported_count" to finalGroundedSizeReportedCount,
+            "maximum_final_grounded_code_points" to maximumFinalGroundedCodePoints,
+            "valid_results_without_grounded_measurement" to
+                validResultsWithoutGroundedMeasurement,
             "failure_count" to failureCount,
             "observed_failure_rate" to observedFailureRate,
             "one_sided_95_percent_wilson_upper_failure_bound" to
@@ -52,6 +69,33 @@ internal data class BioEvalMetrics(
         )
 }
 
+internal data class BioEvalAttemptEvidence(
+    val attemptIndex: Int,
+    val caseId: String,
+    val outcome: BioEvalOutcome,
+    val finalGroundedCodePoints: Int?,
+) {
+    init {
+        require(attemptIndex > 0)
+        require(caseId.matches(Regex("[a-z0-9_-]{1,64}")))
+        require(
+            (outcome == BioEvalOutcome.VALID_PROSE) ==
+                (finalGroundedCodePoints != null),
+        )
+        finalGroundedCodePoints?.let { codePoints ->
+            require(codePoints > 0)
+        }
+    }
+
+    internal fun toSanitizedMap(): Map<String, Any?> =
+        linkedMapOf(
+            "attempt_index" to attemptIndex,
+            "case_id" to caseId,
+            "normalized_result" to outcome.wireValue,
+            "final_grounded_code_points" to finalGroundedCodePoints,
+        )
+}
+
 internal data class BioEvalProvenance(
     val provider: String,
     val exactModelId: String,
@@ -62,6 +106,10 @@ internal data class BioEvalProvenance(
     val promptSha256: String,
     val outputSchemaSha256: String,
     val maxOutputTokens: Int,
+    val modelAuthoredCodePointLimit: Int,
+    val maximumGroundingSourceCodePoints: Int,
+    val finalGroundedCodePointLimit: Int,
+    val groundingStrategy: String,
     val caseOrderStrategy: String,
     val repetitions: Int,
     val plannedCalls: Int,
@@ -71,24 +119,26 @@ internal data class BioEvalProvenance(
 )
 
 internal data class LiveBioEvalReport(
-    val reportSchemaVersion: Int = 4,
+    val reportSchemaVersion: Int = 5,
     val startedAt: Instant,
     val completedAt: Instant,
     val provenance: BioEvalProvenance,
     val pacing: LiveBioEvalPacingSnapshot,
+    val attemptEvidence: List<BioEvalAttemptEvidence>,
     val overall: BioEvalMetrics,
     val byCase: Map<String, BioEvalMetrics>,
     val bySlice: Map<String, BioEvalMetrics>,
 ) {
     /**
-     * Deliberately aggregate-only. Case keys are validated corpus case IDs; this
-     * contains no case request, provider request, provider response, exception
-     * message, credential, or source profile value.
+     * Deliberately content-free. Attempt evidence contains only a sequence
+     * number, validated corpus case ID, normalized outcome, and optional numeric
+     * grounded length. It contains no case request, provider request, provider
+     * response, exception message, credential, or source profile value.
      */
     fun toSanitizedMap(): Map<String, Any> =
         linkedMapOf(
             "report_schema_version" to reportSchemaVersion,
-            "data_policy" to "aggregate_only_no_request_or_response_content",
+            "data_policy" to "sanitized_metrics_no_request_or_response_content",
             "started_at" to startedAt.toString(),
             "completed_at" to completedAt.toString(),
             "provenance" to
@@ -102,6 +152,13 @@ internal data class LiveBioEvalReport(
                     "prompt_sha256" to provenance.promptSha256,
                     "output_schema_sha256" to provenance.outputSchemaSha256,
                     "max_output_tokens" to provenance.maxOutputTokens,
+                    "model_authored_code_point_limit" to
+                        provenance.modelAuthoredCodePointLimit,
+                    "maximum_grounding_source_code_points" to
+                        provenance.maximumGroundingSourceCodePoints,
+                    "final_grounded_code_point_limit" to
+                        provenance.finalGroundedCodePointLimit,
+                    "grounding_strategy" to provenance.groundingStrategy,
                     "case_order_strategy" to provenance.caseOrderStrategy,
                     "repetitions" to provenance.repetitions,
                     "planned_calls" to provenance.plannedCalls,
@@ -116,6 +173,8 @@ internal data class LiveBioEvalReport(
                     "wait_event_count" to pacing.waitEventCount,
                     "actual_wait_nanos" to pacing.actualWaitNanos,
                 ),
+            "attempt_evidence" to
+                attemptEvidence.map(BioEvalAttemptEvidence::toSanitizedMap),
             "overall" to overall.toSanitizedMap(),
             "by_case" to byCase.mapValues { entry -> entry.value.toSanitizedMap() },
             "by_slice" to bySlice.mapValues { entry -> entry.value.toSanitizedMap() },

@@ -80,6 +80,13 @@ object LiveBioEvalMain {
                     "repetitions" to plan.repetitions,
                     "planned_calls" to plan.plannedCalls,
                     "maximum_authorized_calls" to plan.maxCalls,
+                    "model_authored_code_point_limit" to
+                        plan.modelAuthoredCodePointLimit,
+                    "maximum_grounding_source_code_points" to
+                        plan.maximumGroundingSourceCodePoints,
+                    "final_grounded_code_point_limit" to
+                        plan.finalGroundedCodePointLimit,
+                    "grounding_strategy" to plan.groundingStrategy,
                     "pacing_strategy" to plan.pacingStrategy,
                     "minimum_call_interval_millis" to plan.minimumCallIntervalMillis,
                     "configured_minimum_call_start_span_millis" to
@@ -221,10 +228,14 @@ object LiveBioEvalMain {
         val boundaryViolationCount = boundaryViolations.values.sum()
         val providerRequestEvidence = transport.providerRequestEvidence
         val providerResponseEvidence = transport.providerResponseEvidence
+        val groundedEvidenceComplete =
+            report.attemptEvidence.size == report.overall.attempts &&
+                report.overall.validResultsWithoutGroundedMeasurement == 0
         val evidenceComplete =
             providerRequestEvidence["request_count"] == transport.delegatedHttpSendAttempts &&
                 providerRequestEvidence["all_requests_match_expected_configuration"] == true &&
-                providerResponseEvidence["attempt_count"] == transport.delegatedHttpSendAttempts
+                providerResponseEvidence["attempt_count"] == transport.delegatedHttpSendAttempts &&
+                groundedEvidenceComplete
         val allPlannedCallsCompleted = report.overall.attempts == plannedCalls
         val harnessErrorCount =
             report.overall.resultCounts.getValue(BioEvalOutcome.HARNESS_ERROR)
@@ -303,6 +314,7 @@ object LiveBioEvalMain {
                         "synthetic_retention_and_data_use_approved" to true,
                         "hard_boundary_violations" to boundaryViolationCount,
                         "harness_errors" to harnessErrorCount,
+                        "grounded_evidence_complete" to groundedEvidenceComplete,
                         "evidence_complete" to evidenceComplete,
                         "all_planned_calls_completed" to allPlannedCallsCompleted,
                         "passed" to passed,

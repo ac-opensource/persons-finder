@@ -4,6 +4,7 @@ import com.persons.finder.person.bio.BioGenerationFailure
 import com.persons.finder.person.bio.BioGenerationResult
 import com.persons.finder.person.bio.BioGenerator
 import com.persons.finder.person.bio.BioGrounding
+import com.persons.finder.person.bio.BioPolicy
 import com.persons.finder.person.bio.BioTemplateId
 import com.persons.finder.person.bio.GeneratedBio
 import com.persons.finder.person.bio.GeneratedBioTemplate
@@ -67,6 +68,10 @@ internal data class BioEvalCallPlan(
     val plannedCalls: Int,
     val maxCalls: Int,
     val maxOutputTokens: Int,
+    val modelAuthoredCodePointLimit: Int,
+    val maximumGroundingSourceCodePoints: Int,
+    val finalGroundedCodePointLimit: Int,
+    val groundingStrategy: String,
     val pacingStrategy: String,
     val minimumCallIntervalMillis: Long,
     val configuredMinimumCallStartSpanMillis: Long,
@@ -116,6 +121,12 @@ internal class LiveBioEvalRunner(
             plannedCalls = plannedCalls,
             maxCalls = configuration.maxCalls,
             maxOutputTokens = configuration.maxOutputTokens,
+            modelAuthoredCodePointLimit =
+                BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS,
+            maximumGroundingSourceCodePoints =
+                BioPolicy.MAX_SELECTED_SOURCE_CODE_POINTS,
+            finalGroundedCodePointLimit = BioPolicy.FINAL_BIO_MAX_CODE_POINTS,
+            groundingStrategy = MAXIMUM_SYNTHETIC_GROUNDING_STRATEGY,
             pacingStrategy = PACING_STRATEGY,
             minimumCallIntervalMillis = minimumCallIntervalMillis,
             configuredMinimumCallStartSpanMillis = configuredMinimumCallStartSpanMillis,
@@ -163,6 +174,7 @@ internal class LiveBioEvalRunner(
                         outcome = classified.outcome,
                         proseFingerprint = classified.proseFingerprint,
                         deterministicCatalogMatch = classified.deterministicCatalogMatch,
+                        finalGroundedCodePoints = classified.finalGroundedCodePoints,
                         latencyNanos = elapsedNanos,
                     )
                 afterAttempt(
@@ -216,6 +228,11 @@ internal class LiveBioEvalRunner(
                     promptSha256 = configuration.promptSha256,
                     outputSchemaSha256 = configuration.outputSchemaSha256,
                     maxOutputTokens = configuration.maxOutputTokens,
+                    modelAuthoredCodePointLimit = plan.modelAuthoredCodePointLimit,
+                    maximumGroundingSourceCodePoints =
+                        plan.maximumGroundingSourceCodePoints,
+                    finalGroundedCodePointLimit = plan.finalGroundedCodePointLimit,
+                    groundingStrategy = plan.groundingStrategy,
                     caseOrderStrategy = "cyclic_rotation_v1",
                     repetitions = configuration.repetitions,
                     plannedCalls = plan.plannedCalls,
@@ -225,6 +242,15 @@ internal class LiveBioEvalRunner(
                         plan.configuredMinimumCallStartSpanMillis,
                 ),
             pacing = pacer.snapshot(),
+            attemptEvidence =
+                attempts.mapIndexed { index, attempt ->
+                    BioEvalAttemptEvidence(
+                        attemptIndex = index + 1,
+                        caseId = attempt.caseId,
+                        outcome = attempt.outcome,
+                        finalGroundedCodePoints = attempt.finalGroundedCodePoints,
+                    )
+                },
             overall = metricsFor(attempts),
             byCase =
                 attempts
@@ -255,12 +281,15 @@ internal class LiveBioEvalRunner(
                     ClassifiedResult(BioEvalOutcome.INVALID_OUTPUT)
                 } else {
                     try {
-                        GeneratedBio.compose(result.value, MAXIMUM_SYNTHETIC_GROUNDING)
+                        val grounded =
+                            GeneratedBio.compose(result.value, MAXIMUM_SYNTHETIC_GROUNDING)
                         ClassifiedResult(
                             outcome = BioEvalOutcome.VALID_PROSE,
                             proseFingerprint = BioEvalHash.sha256(result.value.value),
                             deterministicCatalogMatch =
                                 result.value in DETERMINISTIC_CATALOG_TEMPLATES,
+                            finalGroundedCodePoints =
+                                grounded.value.codePointCount(0, grounded.value.length),
                         )
                     } catch (_: IllegalArgumentException) {
                         ClassifiedResult(BioEvalOutcome.INVALID_OUTPUT)
@@ -276,6 +305,8 @@ internal class LiveBioEvalRunner(
             }
         val validCount = resultCounts.getValue(BioEvalOutcome.VALID_PROSE)
         val failureCount = attempts.size - validCount
+        val groundedSizes =
+            attempts.mapNotNull(AttemptAggregate::finalGroundedCodePoints)
         return BioEvalMetrics(
             attempts = attempts.size,
             validProseCount = validCount,
@@ -283,6 +314,9 @@ internal class LiveBioEvalRunner(
                 attempts.mapNotNull(AttemptAggregate::proseFingerprint).distinct().size,
             deterministicCatalogMatchCount =
                 attempts.count(AttemptAggregate::deterministicCatalogMatch),
+            finalGroundedSizeReportedCount = groundedSizes.size,
+            maximumFinalGroundedCodePoints = groundedSizes.maxOrNull() ?: 0,
+            validResultsWithoutGroundedMeasurement = validCount - groundedSizes.size,
             failureCount = failureCount,
             observedFailureRate = failureCount.toDouble() / attempts.size,
             oneSided95WilsonUpperFailureBound =
@@ -313,6 +347,7 @@ internal class LiveBioEvalRunner(
         val outcome: BioEvalOutcome,
         val proseFingerprint: String?,
         val deterministicCatalogMatch: Boolean,
+        val finalGroundedCodePoints: Int?,
         val latencyNanos: Long,
     )
 
@@ -320,10 +355,13 @@ internal class LiveBioEvalRunner(
         val outcome: BioEvalOutcome,
         val proseFingerprint: String? = null,
         val deterministicCatalogMatch: Boolean = false,
+        val finalGroundedCodePoints: Int? = null,
     )
 
     private companion object {
         const val PACING_STRATEGY = "minimum_attempt_start_interval_v1"
+        const val MAXIMUM_SYNTHETIC_GROUNDING_STRATEGY =
+            "maximum_approved_source_lengths_v1"
 
         val DETERMINISTIC_CATALOG_TEMPLATES: Set<GeneratedBioTemplate> =
             BioTemplateId.entries.mapTo(mutableSetOf(), GeneratedBioTemplate::fromCatalog)
