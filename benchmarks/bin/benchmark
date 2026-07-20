@@ -805,7 +805,6 @@ command_reset() {
     container_id="$(database_container_id)"
     if [[ -n "${container_id}" ]]; then
         assert_container_identity
-        assert_database_guard
     fi
     assert_volume_identity
     compose down --volumes --remove-orphans

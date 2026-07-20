@@ -40,7 +40,9 @@ pagination, and query-plan capture:
 ./benchmarks/bin/benchmark run
 ```
 
-Stop the benchmark project and delete only its guarded benchmark volume. Raw
+Stop the benchmark project and delete only its guarded benchmark volume. The
+reset relies on benchmark container and volume ownership labels, so it also
+works after a build or migration failure leaves the schema incomplete. Raw
 results are preserved:
 
 ```bash
@@ -187,7 +189,9 @@ The command refuses incomplete or missing raw output and writes only
 Warm results use 25 warm-ups followed by three blocks of 200 measurements.
 Mutating database workloads complete all four warm-up phases before the
 write-count baseline is captured, so warm-up mutations are excluded from every
-reported measured-block delta.
+reported measured-block delta. Those snapshots use exact table-state counts and
+WAL positions; they deliberately omit eventually flushed PostgreSQL cumulative
+statistics.
 Summary throughput is calculated independently for each measured repeat block,
 then reported as the median block rate; gaps between separate invocations are
 never included in a throughput denominator.
