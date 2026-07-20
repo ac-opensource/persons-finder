@@ -1,0 +1,56 @@
+Persons Finder nearby query-plan evidence
+Generated: 2026-07-20T04:35:30.579029Z
+Architecture: aarch64
+Database: PostgreSQL 17.10 (Debian 17.10-1.pgdg13+1) on aarch64-unknown-linux-gnu, compiled by gcc (Debian 14.2.0-19) 14.2.0, 64-bit
+PostGIS: POSTGIS="3.6.4 94d984b" [EXTENSION] PGSQL="170" GEOS="3.13.1-CAPI-1.19.2" PROJ="9.6.0 NETWORK_ENABLED=OFF URL_ENDPOINT= USER_WRITABLE_DIRECTORY=/var/lib/postgresql/.local/share/proj" (compiled against PROJ 9.6.0) LIBXML="2.9.14" LIBJSON="0.18" LIBPROTOBUF="1.5.1" WAGYU="0.5.0 (Internal)"
+Dataset: 20,000 deterministic globally distributed projection rows plus 2 known local matches
+Parameters: lon=0.0, lat=0.0, radiusKm=1.0
+Scope: one execution; this is plan evidence, not a performance conclusion
+
+Query:
+WITH search AS (
+    SELECT
+        ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography AS origin,
+        ?::double precision * 1000.0 AS radius_metres
+)
+SELECT
+    person.id,
+    person.name,
+    person.job_title,
+    person.hobbies,
+    person.bio,
+    person.created_at,
+    last_known.captured_at AS last_known_location_at,
+    ST_Distance(last_known.location, search.origin, true) AS distance_metres
+FROM last_known_location_projection AS last_known
+JOIN person
+    ON person.id = last_known.person_id
+CROSS JOIN search
+WHERE ST_DWithin(
+    last_known.location,
+    search.origin,
+    search.radius_metres,
+    true
+)
+ORDER BY
+    distance_metres,
+    person.id
+
+EXPLAIN (ANALYZE, BUFFERS):
+Sort  (cost=62.54..62.54 rows=2 width=133) (actual time=0.029..0.029 rows=2 loops=1)
+  Sort Key: (st_distance(last_known.location, '0101000020E610000000000000000000000000000000000000'::geography, true)), person.id
+  Sort Method: quicksort  Memory: 25kB
+  Buffers: shared hit=9
+  ->  Nested Loop  (cost=0.69..62.53 rows=2 width=133) (actual time=0.018..0.025 rows=2 loops=1)
+        Buffers: shared hit=9
+        ->  Index Scan using last_known_location_projection_location_gist_idx on last_known_location_projection last_known  (cost=0.40..20.92 rows=2 width=56) (actual time=0.015..0.016 rows=2 loops=1)
+              Index Cond: (location && _st_expand('0101000020E610000000000000000000000000000000000000'::geography, '1000'::double precision))
+              Filter: st_dwithin(location, '0101000020E610000000000000000000000000000000000000'::geography, '1000'::double precision, true)
+              Buffers: shared hit=3
+        ->  Index Scan using person_pkey on person  (cost=0.29..8.30 rows=1 width=117) (actual time=0.001..0.001 rows=1 loops=2)
+              Index Cond: (id = last_known.person_id)
+              Buffers: shared hit=6
+Planning:
+  Buffers: shared hit=89
+Planning Time: 0.357 ms
+Execution Time: 0.039 ms

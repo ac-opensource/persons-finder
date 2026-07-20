@@ -264,8 +264,7 @@ class CreatePersonControllerContractTest {
     }
 
     @Test
-    fun `nearby and stale versioned routes are not added in this slice`() {
-        mockMvc.perform(get("/persons/nearby")).andExpect(status().isNotFound)
+    fun `stale versioned routes are not added`() {
         mockMvc.perform(get("/api/v1/persons")).andExpect(status().isNotFound)
     }
 
