@@ -12,35 +12,7 @@ class JdbcNearbyPersonRepository(
 ) : NearbyPersonRepository {
     override fun find(query: FindNearbyQuery): List<NearbyPerson> =
         jdbcTemplate.query(
-            """
-            WITH search AS (
-                SELECT
-                    ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography AS origin,
-                    ?::double precision * 1000.0 AS radius_metres
-            )
-            SELECT
-                person.id,
-                person.name,
-                person.job_title,
-                person.hobbies,
-                person.bio,
-                person.created_at,
-                last_known.captured_at AS last_known_location_at,
-                ST_Distance(last_known.location, search.origin, true) / 1000.0 AS distance_km
-            FROM person
-            JOIN last_known_location_projection AS last_known
-                ON last_known.person_id = person.id
-            CROSS JOIN search
-            WHERE ST_DWithin(
-                last_known.location,
-                search.origin,
-                search.radius_metres,
-                true
-            )
-            ORDER BY
-                ST_Distance(last_known.location, search.origin, true),
-                person.id
-            """.trimIndent(),
+            INDEXED_NEARBY_QUERY,
             nearbyPersonRowMapper,
             query.origin.longitude,
             query.origin.latitude,
@@ -64,7 +36,40 @@ class JdbcNearbyPersonRepository(
                 createdAt = resultSet.getTimestamp("created_at").toInstant(),
                 lastKnownLocationAt =
                     resultSet.getTimestamp("last_known_location_at").toInstant(),
-                distanceKm = resultSet.getDouble("distance_km"),
+                distanceKm = resultSet.getDouble("distance_metres") / METRES_PER_KILOMETRE,
             )
         }
 }
+
+internal val INDEXED_NEARBY_QUERY =
+    """
+    WITH search AS (
+        SELECT
+            ST_SetSRID(ST_MakePoint(?, ?), 4326)::geography AS origin,
+            ?::double precision * 1000.0 AS radius_metres
+    )
+    SELECT
+        person.id,
+        person.name,
+        person.job_title,
+        person.hobbies,
+        person.bio,
+        person.created_at,
+        last_known.captured_at AS last_known_location_at,
+        ST_Distance(last_known.location, search.origin, true) AS distance_metres
+    FROM last_known_location_projection AS last_known
+    JOIN person
+        ON person.id = last_known.person_id
+    CROSS JOIN search
+    WHERE ST_DWithin(
+        last_known.location,
+        search.origin,
+        search.radius_metres,
+        true
+    )
+    ORDER BY
+        distance_metres,
+        person.id
+    """.trimIndent()
+
+private const val METRES_PER_KILOMETRE = 1000.0

@@ -105,17 +105,18 @@ class RealPostgisPersistenceTest {
     }
 
     @Test
-    fun `fresh Flyway migration creates only canonical geography schema and is repeatable`() {
-        val migration =
-            jdbc.queryForMap(
+    fun `fresh Flyway migration creates canonical geography and search index repeatably`() {
+        val migrations =
+            jdbc.queryForList(
                 """
                 SELECT version, success
                 FROM flyway_schema_history
-                WHERE version = '2'
+                WHERE version IN ('2', '3')
+                ORDER BY version
                 """.trimIndent(),
             )
-        assertEquals("2", migration["version"])
-        assertEquals(true, migration["success"])
+        assertEquals(listOf("2", "3"), migrations.map { it["version"] })
+        assertTrue(migrations.all { it["success"] == true })
         assertTrue(flyway.validateWithResult().validationSuccessful)
         assertEquals(0, flyway.migrate().migrationsExecuted)
 
@@ -164,7 +165,21 @@ class RealPostgisPersistenceTest {
                 """.trimIndent(),
                 Int::class.java,
             )
-        assertEquals(0, gistIndexes)
+        assertEquals(1, gistIndexes)
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                """
+                SELECT count(*)
+                FROM pg_indexes
+                WHERE schemaname = 'public'
+                  AND tablename = 'last_known_location_projection'
+                  AND indexname = 'last_known_location_projection_location_gist_idx'
+                  AND indexdef ILIKE '%USING gist (location)%'
+                """.trimIndent(),
+                Int::class.java,
+            ),
+        )
 
         val clientUpdateUniqueConstraint =
             jdbc.queryForObject(
