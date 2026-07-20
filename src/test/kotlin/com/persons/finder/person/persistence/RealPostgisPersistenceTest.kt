@@ -313,6 +313,39 @@ class RealPostgisPersistenceTest {
     }
 
     @Test
+    fun `real HTTP stack rejects coerced JSON scalar types`() {
+        listOf(
+            """
+            {
+              "name": 123,
+              "jobTitle": "Software engineer",
+              "hobbies": ["hiking"],
+              "location": {"latitude": -41.2865, "longitude": 174.7762}
+            }
+            """.trimIndent() to "name",
+            """
+            {
+              "name": "Aroha",
+              "jobTitle": "Software engineer",
+              "hobbies": ["hiking"],
+              "location": {"latitude": "-41.2865", "longitude": 174.7762}
+            }
+            """.trimIndent() to "location.latitude",
+        ).forEach { (body, field) ->
+            mockMvc.perform(
+                post("/persons")
+                    .contentType(MediaType.APPLICATION_JSON)
+                    .content(body),
+            )
+                .andExpect(status().isBadRequest)
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.violations[0].field").value(field))
+                .andExpect(jsonPath("$.violations[0].code").value("INVALID_TYPE"))
+        }
+        assertAllTablesEmpty()
+    }
+
+    @Test
     fun `HTTP no-key replay is a no-op and distinct updates append immutable rows`() {
         val personId = createOverHttp()
         val firstBody = """{"latitude":-36.8485,"longitude":174.7633}"""

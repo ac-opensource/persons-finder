@@ -211,7 +211,7 @@ private val REQUIRED_TOKENS = listOf("{{NAME}}", "{{JOB}}", "{{HOBBY}}")
 private val APPROVED_TOKEN = Regex("""\{\{(NAME|JOB|HOBBY)}}""")
 private val DISALLOWED_REGION_TERMS = listOf("North Island", "South Island")
 private val SENTENCE_BOUNDARY_WITH_CONTINUATION =
-    Regex("""([.!?])(?:["')\]]*)\s+(?=\S)""")
+    Regex("""([.!?])(?:["')\]]*)\s*(?=\S)""")
 private val PRECEDING_WORD = Regex("""([\p{L}]+(?:\.[\p{L}]+)*)$""")
 private val NON_TERMINAL_PERIOD_WORDS =
     setOf("dr", "e.g", "i.e", "jr", "mr", "mrs", "ms", "prof", "sr", "st", "vs")

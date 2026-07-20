@@ -119,6 +119,21 @@ class BioPolicyTest {
     }
 
     @Test
+    fun `template contract rejects adjacent generated sentences`() {
+        val profile = PersonProfile.create("Aroha", "Engineer", listOf("hiking"))
+
+        listOf('.', '!', '?').forEach { punctuation ->
+            assertThrows(IllegalArgumentException::class.java) {
+                policy.compose(
+                    "{{NAME}} is a {{JOB}}$punctuation{{HOBBY}} is great.",
+                    profile,
+                    "hiking",
+                )
+            }
+        }
+    }
+
+    @Test
     fun `selected source values must leave room for the documented template`() {
         val profile =
             PersonProfile.create(
