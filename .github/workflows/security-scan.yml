@@ -1,0 +1,85 @@
+name: Security scan
+
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-scan-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository:
+    name: Repository configuration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TRIVY_DISABLE_TELEMETRY: "true"
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Scan configuration
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          scan-type: fs
+          scan-ref: .
+          scanners: misconfig
+          severity: HIGH,CRITICAL
+          exit-code: "1"
+          format: table
+          hide-progress: true
+          skip-dirs: .git,.gradle,build
+          timeout: 10m
+
+  images:
+    name: Container image (${{ matrix.name }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      TRIVY_DISABLE_TELEMETRY: "true"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: application
+            dockerfile: Dockerfile
+            image: persons-finder-app:security-scan
+          - name: postgis
+            dockerfile: Dockerfile.postgis
+            image: persons-finder-postgis:security-scan
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build image
+        run: >-
+          docker build
+          --file "${{ matrix.dockerfile }}"
+          --tag "${{ matrix.image }}"
+          .
+
+      - name: Scan image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          version: v0.72.0
+          scan-type: image
+          image-ref: ${{ matrix.image }}
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          exit-code: "1"
+          format: table
+          hide-progress: true
+          timeout: 10m

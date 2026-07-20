@@ -5,3 +5,9 @@ FROM ghcr.io/pglayers/pgx-postgis:17@sha256:e2113e93a71f5f8fd272830c9c7c4843bc7d
 FROM postgres:17@sha256:a426e44bac0b759c95894d68e1a0ac03ecc20b619f498a91aae373bf06d8508d
 
 COPY --from=postgis / /
+
+# The Compose stack owns a PostgreSQL-user-writable named volume, so the
+# entrypoint does not need a root-to-postgres transition through gosu.
+RUN rm /usr/local/bin/gosu
+
+USER postgres
