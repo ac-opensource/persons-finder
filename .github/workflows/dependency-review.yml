@@ -16,7 +16,7 @@ jobs:
   review:
     name: Dependency review
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
 
     steps:
       - name: Check out repository
@@ -28,6 +28,6 @@ jobs:
           fail-on-severity: high
           fail-on-scopes: runtime, development, unknown
           retry-on-snapshot-warnings: true
-          retry-on-snapshot-warnings-timeout: 300
+          retry-on-snapshot-warnings-timeout: 600
           show-openssf-scorecard: false
           show-patched-versions: true
