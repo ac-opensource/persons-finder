@@ -1,0 +1,354 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="A local dashboard for creating, moving, and finding nearby people.">
+    <title>Persons Finder Dashboard</title>
+    <link rel="stylesheet" href="/webjars/leaflet/1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="/assets/dashboard.css">
+    <script src="/webjars/leaflet/1.9.4/dist/leaflet.js" defer></script>
+    <script src="/assets/dashboard.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#map">Skip to the nearby map</a>
+
+<header class="app-header">
+    <div class="brand-lockup">
+        <span class="brand-mark" aria-hidden="true">PF</span>
+        <div>
+            <h1>Persons Finder</h1>
+            <p>Local operations dashboard</p>
+        </div>
+    </div>
+
+    <div class="header-status">
+        <span class="environment-badge">Same-origin API</span>
+        <div id="app-status" class="api-status" data-state="unknown" role="status" aria-live="polite">
+            <span class="status-dot" aria-hidden="true"></span>
+            <span id="api-status-label">API not checked</span>
+        </div>
+    </div>
+</header>
+
+<main class="dashboard-layout" aria-label="Persons Finder dashboard">
+    <aside class="panel controls-panel" aria-labelledby="controls-heading">
+        <div class="panel-heading">
+            <div>
+                <p class="eyebrow">Workspace</p>
+                <h2 id="controls-heading">Map tools</h2>
+            </div>
+        </div>
+
+        <section class="control-section" aria-labelledby="mode-heading">
+            <div class="section-heading-row">
+                <h3 id="mode-heading">Click action</h3>
+                <span class="step-label">1</span>
+            </div>
+            <div class="mode-switch" role="group" aria-label="Choose what happens when the map is clicked">
+                <button id="mode-add" class="mode-button is-active" type="button" data-map-mode="add" aria-pressed="true">
+                    Add person
+                </button>
+                <button id="mode-center" class="mode-button" type="button" data-map-mode="center" aria-pressed="false">
+                    Set nearby centre
+                </button>
+            </div>
+            <p id="map-mode-help" class="help-text">Click the map to open a person form at that location.</p>
+            <button id="open-create-person" class="button button-secondary button-full" type="button">
+                Add at map centre
+            </button>
+        </section>
+
+        <section class="control-section" aria-labelledby="search-heading">
+            <div class="section-heading-row">
+                <h3 id="search-heading">Nearby search</h3>
+                <span class="step-label">2</span>
+            </div>
+
+            <div class="field-group compact-field">
+                <div class="label-row">
+                    <label for="radius-input">Radius</label>
+                    <output id="radius-output" for="radius-input radius-range">10 km</output>
+                </div>
+                <div class="input-with-unit">
+                    <input id="radius-input" name="radiusKm" type="number" min="0.1" max="100" step="0.1" value="10" inputmode="decimal" aria-describedby="radius-help">
+                    <span aria-hidden="true">km</span>
+                </div>
+                <input id="radius-range" class="range-input" type="range" min="0.1" max="100" step="0.1" value="10" aria-label="Nearby radius in kilometres">
+                <p id="radius-help" class="field-help">Accepted API range: more than 0 km, up to 100 km.</p>
+                <button id="refresh-nearby" class="button button-secondary button-full" type="button">Refresh nearby</button>
+            </div>
+
+            <fieldset class="coordinate-fields">
+                <legend>Search centre</legend>
+                <div class="coordinate-grid">
+                    <div class="field-group">
+                        <label for="centre-latitude">Latitude</label>
+                        <input id="centre-latitude" name="centreLatitude" type="number" min="-90" max="90" step="any" value="-36.8485" inputmode="decimal">
+                    </div>
+                    <div class="field-group">
+                        <label for="centre-longitude">Longitude</label>
+                        <input id="centre-longitude" name="centreLongitude" type="number" min="-180" max="180" step="any" value="174.7633" inputmode="decimal">
+                    </div>
+                </div>
+                <button id="apply-centre" class="button button-secondary button-full" type="button">Apply centre</button>
+            </fieldset>
+        </section>
+
+        <section class="control-section session-section" aria-labelledby="session-heading">
+            <div class="section-heading-row">
+                <div>
+                    <h3 id="session-heading">People in this tab</h3>
+                    <p class="section-subtitle"><span id="session-count">0</span> tab-known</p>
+                </div>
+                <span class="step-label">3</span>
+            </div>
+            <p class="help-text">Markers show the last location submitted by this browser tab—not a complete map of backend records.</p>
+
+            <div id="session-state" class="empty-state compact-empty" role="status" aria-live="polite">
+                <span class="empty-state-icon" aria-hidden="true">+</span>
+                <p>Add someone from the map to see them here.</p>
+            </div>
+            <ul id="session-list" class="people-list" aria-label="People created or moved in this tab"></ul>
+
+            <button id="forget-session" class="button button-quiet button-full" type="button">Forget tab map data</button>
+            <p class="field-help">Clears this tab only. It does not delete any backend person or location record.</p>
+        </section>
+    </aside>
+
+    <section class="panel map-panel" aria-labelledby="map-heading">
+        <div class="map-toolbar">
+            <div>
+                <p class="eyebrow">Last-known locations</p>
+                <h2 id="map-heading">Nearby map</h2>
+            </div>
+            <div class="map-legend" aria-label="Map legend">
+                <span><i class="legend-dot legend-centre" aria-hidden="true"></i>Search centre</span>
+                <span><i class="legend-dot legend-nearby" aria-hidden="true"></i>Nearby</span>
+                <span><i class="legend-dot legend-outside" aria-hidden="true"></i>Outside radius</span>
+                <span><i class="legend-dot legend-saving" aria-hidden="true"></i>Updating</span>
+            </div>
+        </div>
+
+        <div class="map-stage">
+            <div id="tile-warning" class="map-message map-message-warning" role="status" aria-live="polite" hidden>
+                Basemap unavailable. API tools and tab-known markers still work.
+            </div>
+            <div
+                id="map"
+                tabindex="0"
+                aria-label="Interactive map. Select Add person or Set nearby centre before choosing a location."
+                data-tile-url="https://tile.openstreetmap.org/{z}/{x}/{y}.png"
+                data-tile-attribution="&copy; &lt;a href=&quot;https://www.openstreetmap.org/copyright&quot;&gt;OpenStreetMap&lt;/a&gt; contributors"
+            ></div>
+            <div id="map-status" class="map-instruction" aria-live="polite">
+                Add mode · choose a location on the map
+            </div>
+        </div>
+
+        <footer class="map-caption">
+            <p><strong>API-authoritative.</strong> The geofence and result order follow <code>GET /persons/nearby</code>.</p>
+            <p>Drag a tab-known person marker to submit a new last-known location.</p>
+        </footer>
+    </section>
+
+    <aside class="panel nearby-panel" aria-labelledby="nearby-heading">
+        <div class="panel-heading nearby-heading">
+            <div>
+                <p class="eyebrow">Search results</p>
+                <h2 id="nearby-heading">Nearby people</h2>
+            </div>
+            <span id="nearby-count" class="count-badge" aria-label="0 nearby people">0</span>
+        </div>
+
+        <div id="nearby-state" class="query-status" role="status" aria-live="polite">
+            Adjust the centre or radius to search.
+        </div>
+
+        <div id="nearby-empty" class="empty-state">
+            <span class="empty-state-icon" aria-hidden="true">◎</span>
+            <h3>No nearby results yet</h3>
+            <p>Results will appear in the exact order returned by the API.</p>
+        </div>
+        <ol id="nearby-list" class="nearby-list" aria-label="Nearby people in API order"></ol>
+
+        <section id="person-detail" class="person-detail" aria-label="Selected person details">
+            <div id="detail-empty" class="detail-empty">
+                <span class="empty-state-icon" aria-hidden="true">i</span>
+                <p>Select a nearby result to inspect its API details.</p>
+            </div>
+            <div id="detail-content" hidden>
+                <div class="detail-heading">
+                    <div>
+                        <p class="eyebrow">Selected person</p>
+                        <h3 id="detail-name"></h3>
+                    </div>
+                    <span id="detail-distance" class="distance-badge"></span>
+                </div>
+
+                <dl class="detail-list">
+                    <div>
+                        <dt>Job</dt>
+                        <dd id="detail-job"></dd>
+                    </div>
+                    <div>
+                        <dt>Hobbies</dt>
+                        <dd id="detail-hobbies"></dd>
+                    </div>
+                    <div>
+                        <dt>Bio</dt>
+                        <dd id="detail-bio"></dd>
+                    </div>
+                    <div>
+                        <dt>Last known</dt>
+                        <dd id="detail-last-known"></dd>
+                    </div>
+                </dl>
+                <p id="detail-location-note" class="location-note">Location withheld when this tab does not know the coordinates.</p>
+            </div>
+        </section>
+    </aside>
+</main>
+
+<dialog id="create-dialog" class="person-dialog" aria-labelledby="create-person-title" aria-describedby="create-person-description">
+    <form id="create-form">
+        <div class="dialog-header">
+            <div>
+                <p class="eyebrow">New last-known location</p>
+                <h2 id="create-person-title">Create a person here</h2>
+                <p id="create-person-description">Profile fields are validated by the backend before anything is saved.</p>
+            </div>
+            <button id="close-create-dialog" class="icon-button" type="button" aria-label="Close create person dialog">×</button>
+        </div>
+
+        <div class="dialog-body">
+            <div id="create-error" class="problem-message" role="alert" aria-live="assertive" hidden>
+                <strong id="create-problem-title">Could not create this person</strong>
+                <p id="create-problem-detail"></p>
+                <ul id="create-problem-list"></ul>
+            </div>
+
+            <div class="field-group">
+                <div class="label-row">
+                    <label for="person-name">Name</label>
+                    <span id="name-count" class="character-count">0 / 80</span>
+                </div>
+                <input id="person-name" name="name" type="text" autocomplete="name" required aria-describedby="name-help">
+                <p id="name-help" class="field-help">1–80 Unicode characters.</p>
+            </div>
+
+            <div class="field-group">
+                <div class="label-row">
+                    <label for="person-job">Job</label>
+                    <span id="job-count" class="character-count">0 / 80</span>
+                </div>
+                <input id="person-job" name="jobTitle" type="text" list="job-suggestions" autocomplete="organization-title" required aria-describedby="job-help">
+                <datalist id="job-suggestions">
+                    <option value="Software engineer"></option>
+                    <option value="Teacher"></option>
+                    <option value="Designer"></option>
+                    <option value="Nurse"></option>
+                    <option value="Carpenter"></option>
+                </datalist>
+                <p id="job-help" class="field-help">1–80 Unicode characters. Suggestions are optional; other benign jobs are accepted.</p>
+            </div>
+
+            <fieldset class="hobbies-fieldset">
+                <legend>Hobbies</legend>
+                <div class="fieldset-heading">
+                    <p class="field-help">Add 1–10 hobbies, each 1–60 Unicode characters. Exact duplicates are normalized by the API.</p>
+                    <span id="hobby-count" class="character-count">1 / 10</span>
+                </div>
+
+                <div id="hobbies-list" class="hobby-list">
+                    <div class="hobby-row" data-hobby-row>
+                        <div class="field-group">
+                            <label class="sr-only" for="hobby-0">Hobby 1</label>
+                            <input id="hobby-0" name="hobbies" type="text" list="hobby-suggestions" required aria-label="Hobby 1">
+                        </div>
+                        <span class="character-count" data-hobby-character-count>0 / 60</span>
+                        <button class="icon-button remove-hobby" type="button" aria-label="Remove hobby 1" data-remove-hobby disabled>×</button>
+                    </div>
+                </div>
+                <datalist id="hobby-suggestions">
+                    <option value="Hiking"></option>
+                    <option value="Reading"></option>
+                    <option value="Photography"></option>
+                    <option value="Cooking"></option>
+                    <option value="Running"></option>
+                    <option value="Gardening"></option>
+                </datalist>
+                <button id="add-hobby" class="button button-quiet" type="button">+ Add another hobby</button>
+            </fieldset>
+
+            <fieldset class="coordinate-fields dialog-coordinates">
+                <legend>Location</legend>
+                <div class="coordinate-grid">
+                    <div class="field-group">
+                        <label for="create-latitude">Latitude</label>
+                        <input id="create-latitude" name="latitude" type="number" min="-90" max="90" step="any" inputmode="decimal" required>
+                    </div>
+                    <div class="field-group">
+                        <label for="create-longitude">Longitude</label>
+                        <input id="create-longitude" name="longitude" type="number" min="-180" max="180" step="any" inputmode="decimal" required>
+                    </div>
+                </div>
+                <p class="field-help">Coordinates are editable for precise and keyboard-only entry.</p>
+            </fieldset>
+
+            <div class="policy-note">
+                <strong>The server remains authoritative.</strong>
+                <p>It can reject unsafe or invalid profile content even when these field-level checks pass.</p>
+            </div>
+        </div>
+
+        <div class="dialog-actions">
+            <button id="create-cancel" class="button button-secondary" type="button">Cancel</button>
+            <button id="create-submit" class="button button-primary" type="submit">Create person</button>
+        </div>
+    </form>
+</dialog>
+
+<template id="hobby-row-template">
+    <div class="hobby-row" data-hobby-row>
+        <div class="field-group">
+            <label class="sr-only" data-hobby-label>Hobby</label>
+            <input name="hobbies" type="text" list="hobby-suggestions" required data-hobby-input>
+        </div>
+        <span class="character-count" data-hobby-character-count>0 / 60</span>
+        <button class="icon-button remove-hobby" type="button" aria-label="Remove hobby" data-remove-hobby>×</button>
+    </div>
+</template>
+
+<template id="session-person-template">
+    <li class="person-row" data-person-id="">
+        <button class="person-row-button" type="button" data-select-person>
+            <span class="person-avatar" data-person-initials aria-hidden="true"></span>
+            <span class="person-row-copy">
+                <strong data-person-name></strong>
+                <small data-person-job></small>
+                <small class="person-row-location" data-person-location>Last submitted by this tab</small>
+            </span>
+            <span class="person-state" data-person-state></span>
+        </button>
+    </li>
+</template>
+
+<template id="nearby-item-template">
+    <li class="nearby-item" data-person-id="">
+        <button class="nearby-card" type="button" data-select-nearby>
+            <span class="nearby-rank" data-nearby-rank aria-hidden="true"></span>
+            <span class="nearby-copy">
+                <strong data-nearby-name></strong>
+                <small data-nearby-job></small>
+                <small class="nearby-location-note" data-nearby-location-note>Location withheld</small>
+            </span>
+            <span class="distance-badge" data-nearby-distance></span>
+        </button>
+    </li>
+</template>
+
+<div id="toast-region" class="toast-region" role="region" aria-label="Notifications" aria-live="polite"></div>
+<div id="live-region" class="sr-only" role="status" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>

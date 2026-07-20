@@ -122,6 +122,36 @@ high or critical findings under the workflow's stated filters. That workflow is
 CI configuration, not evidence that a scan passed for an unpushed local
 revision.
 
+## Local dashboard privacy and map egress
+
+The public API deliberately omits stored coordinates from person, location-
+update, and nearby-search responses. The local dashboard can plot only
+coordinates authored by the current browser tab when it creates or moves a
+person. It retains that mapping in `sessionStorage`, which is scoped to the
+tab's page session and is cleared when the tab is closed or when the user
+chooses **Forget tab map data**. That action does not erase backend people or
+location observations. Profile details and coordinates remain sensitive even
+within this short-lived browser state. Nearby search necessarily sends centre
+coordinates in the same-origin API query URL; they must not be copied into
+logs, analytics, third-party URLs, or map-tile requests.
+
+The default basemap loads OpenStreetMap tiles from an external best-effort
+service. Those requests disclose the tile zoom/column/row (`z/x/y`) and the
+browser referrer, which together can reveal the approximate viewed area. They
+do not include person profiles, bios, identifiers, API payloads, or the
+dashboard's tab-retained coordinate mapping. A sensitive deployment must use a
+privacy-approved or self-hosted tile provider and comply with that provider's
+usage policy rather than treating the public tile service as an availability
+dependency.
+
+The evaluator-default backend is unauthenticated and exposed only on loopback.
+It has no application-level authentication or rate limiting. Repeated,
+carefully chosen nearby queries could be combined to infer a person's location
+despite the response schema withholding coordinates. Do not expose this
+dashboard or API beyond the trusted local environment until authenticated
+authorization, abuse controls, and an approved location-disclosure policy are
+implemented.
+
 ## Third-party PII and model risk
 
 Sending names, precise locations, employment details, hobbies, identifiers, or
