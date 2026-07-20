@@ -1,5 +1,6 @@
 package com.persons.finder.person.nearby
 
+import com.persons.finder.person.bio.BioPolicy
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import java.math.BigDecimal
@@ -11,7 +12,11 @@ data class NearbyPersonResponse(
     val jobTitle: String,
     @field:ArraySchema(schema = Schema(nullable = false))
     val hobbies: List<String>,
-    @field:Schema(minLength = 1, maxLength = 320, pattern = ".*\\S.*")
+    @field:Schema(
+        minLength = 1,
+        maxLength = BioPolicy.FINAL_BIO_MAX_CODE_POINTS,
+        pattern = ".*\\S.*",
+    )
     val bio: String,
     @field:Schema(type = "string", format = "date-time")
     val createdAt: String,

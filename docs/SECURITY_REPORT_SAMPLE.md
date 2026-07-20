@@ -15,7 +15,7 @@
 | Code scope | Current working tree; no release or commit hash asserted |
 | Primary concern | Prompt injection, PII egress, unsafe model output, and failure atomicity |
 | Verification command | `./gradlew test --console=plain` |
-| Recorded result | 265 tests: 262 passed, 0 failed, 3 intentionally skipped live-provider evaluations |
+| Recorded result | 297 tests: 294 passed, 0 failed, 3 intentionally skipped live-provider evaluations |
 
 ## Executive summary
 
@@ -82,7 +82,7 @@ Unmatched or sensitive values degrade to `other`.
 
 The remote result is one model-authored `bio_template` string. The application
 validates exactly one each of `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, one to
-three safe sentences, printable ASCII, and the 260-code-point literal budget,
+three safe sentences, printable ASCII, and the 4,000-code-point literal budget,
 then parses literal/token segments and inserts validated source strings once as
 opaque local data. They cannot enter the provider request and are never
 rescanned after insertion.
@@ -134,7 +134,7 @@ Evidence:
 - Status: Remediated
 
 The HTTP transport uses a back-pressured body subscriber and cancels the
-subscription before buffering more than 65,536 response bytes. Provider clients
+subscription before buffering more than 262,144 response bytes. Provider clients
 classify that response as invalid output without exposing its contents.
 
 Evidence:
@@ -169,7 +169,7 @@ report does not claim that control is implemented.
 | Oversized provider response | Subscription cancelled and failure normalized | HTTP transport and provider-client tests |
 | Missing, duplicate, mutated, escaped, wrapped, or unknown placeholder | `BIO_GENERATION_INVALID`; no writes | Application template and transaction tests |
 | Placeholder-looking or regex-significant source | Inserted once as opaque data and revalidated | Trusted-composer tests |
-| Any validated prose/job/interest combination | One to three safe grounded sentences of at most 480 Unicode code points | Prose-property, mapping, composer, and bounds tests |
+| Any validated prose/job/interest combination | One to three safe grounded sentences of at most 4,220 Unicode code points | Prose-property, mapping, composer, and bounds tests |
 | Bio policy, provider, parsing, or rendering failure | No person, observation, or projection write | Application and real PostGIS tests |
 
 ## Residual risks and next actions
@@ -181,12 +181,12 @@ report does not claim that control is implemented.
    approval accepts provider data use only for the fixed synthetic smoke
    fixtures and versioned aggregate corpus; it neither claims logging is
    disabled nor authorizes customer/production data.
-2. Precommit the separate three-call smoke and the 456-call aggregate run:
-   12 cases x 38 repetitions and a one-sided 95% Wilson upper failure bound at
-   or below 1%. Pace the Gemini free-tier plan by at least 6,000 milliseconds
-   between attempt starts; explicitly use a zero interval for the approved paid
-   OpenAI fallback. At most one aggregate failure passes; do not retry, top up,
-   or pool providers.
+2. Run the approved three-call `gpt-5.6-luna` calibration first with a zero
+   interval, no retries, and the cumulative USD 50 investigation ceiling.
+   Review the sanitized usage and structural maxima before choosing the final
+   output allowance. The separately designed 456-call reliability aggregate
+   (12 cases x 38 repetitions, one-sided 95% Wilson upper failure bound at or
+   below 1%) is not authorized by the calibration approval.
 3. Keep remote mode on private networking until authenticated, rate-limited
    ingress and cost budgets are implemented and tested.
 4. Complete provider privacy, retention, residency, subprocessor, and incident

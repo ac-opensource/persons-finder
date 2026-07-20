@@ -74,6 +74,14 @@ tasks.register<Test>("liveAiSmoke") {
 		)
 	}
 	systemProperty("liveAiSmoke.required", "true")
+	systemProperty(
+		"liveAiSmoke.reportDir",
+		layout.buildDirectory.dir("reports/live-ai-smoke").get().asFile.absolutePath,
+	)
+	systemProperty(
+		"liveAiSmoke.durableReportDir",
+		layout.projectDirectory.dir(".agents/evidence/live-ai-smoke").asFile.absolutePath,
+	)
 	outputs.upToDateWhen { false }
 }
 
@@ -87,6 +95,10 @@ tasks.register<JavaExec>("liveAiEval") {
 	systemProperty(
 		"liveAiEval.reportDir",
 		layout.buildDirectory.dir("reports/live-ai-eval").get().asFile.absolutePath,
+	)
+	systemProperty(
+		"liveAiEval.durableReportDir",
+		layout.projectDirectory.dir(".agents/evidence/live-ai-eval").asFile.absolutePath,
 	)
 	outputs.upToDateWhen { false }
 }

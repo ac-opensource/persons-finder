@@ -97,13 +97,16 @@ internal class GeminiModelProviderClient(
         }
         val candidate = body.path("candidates").firstOrNull()
             ?: return ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
-        return when (candidate.textValue("finishReason")) {
-            "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST" ->
+        return when (classifyGeminiFinishReason(candidate.textValue("finishReason"))) {
+            GeminiFinishDisposition.POLICY_REJECTED ->
                 ModelProviderResult.Failure(BioGenerationFailure.POLICY_REJECTED)
 
-            "MAX_TOKENS" -> ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
-            "STOP" -> extractStoppedOutput(candidate)
-            else -> ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
+            GeminiFinishDisposition.MAX_TOKENS ->
+                ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
+
+            GeminiFinishDisposition.COMPLETED -> extractStoppedOutput(candidate)
+            GeminiFinishDisposition.INVALID ->
+                ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT)
         }
     }
 
@@ -132,3 +135,20 @@ internal class GeminiModelProviderClient(
             "https://generativelanguage.googleapis.com/v1beta/models"
     }
 }
+
+internal enum class GeminiFinishDisposition {
+    COMPLETED,
+    POLICY_REJECTED,
+    MAX_TOKENS,
+    INVALID,
+}
+
+internal fun classifyGeminiFinishReason(reason: String?): GeminiFinishDisposition =
+    when (reason) {
+        "STOP" -> GeminiFinishDisposition.COMPLETED
+        "SAFETY", "PROHIBITED_CONTENT", "BLOCKLIST" ->
+            GeminiFinishDisposition.POLICY_REJECTED
+
+        "MAX_TOKENS" -> GeminiFinishDisposition.MAX_TOKENS
+        else -> GeminiFinishDisposition.INVALID
+    }

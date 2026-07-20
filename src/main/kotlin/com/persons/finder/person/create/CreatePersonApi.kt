@@ -1,5 +1,6 @@
 package com.persons.finder.person.create
 
+import com.persons.finder.person.bio.BioPolicy
 import io.swagger.v3.oas.annotations.media.ArraySchema
 import io.swagger.v3.oas.annotations.media.Schema
 import java.util.UUID
@@ -36,7 +37,11 @@ data class CreatePersonResponse(
     val name: String,
     val jobTitle: String,
     val hobbies: List<String>,
-    @field:Schema(minLength = 1, maxLength = 320, pattern = ".*\\S.*")
+    @field:Schema(
+        minLength = 1,
+        maxLength = BioPolicy.FINAL_BIO_MAX_CODE_POINTS,
+        pattern = ".*\\S.*",
+    )
     val bio: String,
     @field:Schema(type = "string", format = "date-time", pattern = UTC_MILLISECOND_PATTERN)
     val createdAt: String,

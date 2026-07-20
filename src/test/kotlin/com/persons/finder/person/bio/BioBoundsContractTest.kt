@@ -1,9 +1,14 @@
 package com.persons.finder.person.bio
 
 import com.persons.finder.person.bio.remote.MAX_REMOTE_GENERATOR_OUTPUT_CHARS
+import com.persons.finder.person.bio.remote.MAX_REMOTE_PROVIDER_OUTPUT_TOKENS
+import com.persons.finder.person.bio.remote.MAX_PROVIDER_RESPONSE_BYTES
 import com.persons.finder.person.bio.remote.ModelProviderClient
 import com.persons.finder.person.bio.remote.ModelProviderResult
 import com.persons.finder.person.bio.remote.RemoteBioGenerator
+import com.persons.finder.person.create.CreatePersonResponse
+import com.persons.finder.person.nearby.NearbyPersonResponse
+import io.swagger.v3.oas.annotations.media.Schema
 import com.persons.finder.person.model.PersonProfile
 import com.persons.finder.person.model.ProfileValidationException
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -13,6 +18,28 @@ import org.junit.jupiter.api.Test
 import java.time.Duration
 
 class BioBoundsContractTest {
+    @Test
+    fun `public create and nearby schemas share the final bio limit`() {
+        listOf(
+            CreatePersonResponse::class.java,
+            NearbyPersonResponse::class.java,
+        ).forEach { responseType ->
+            val schema =
+                requireNotNull(
+                    responseType.getDeclaredField("bio").getAnnotation(Schema::class.java),
+                )
+            assertEquals(BioPolicy.FINAL_BIO_MAX_CODE_POINTS, schema.maxLength)
+        }
+    }
+
+    @Test
+    fun `provider envelope cap leaves bounded headroom above the temporary token ceiling`() {
+        assertTrue(
+            MAX_PROVIDER_RESPONSE_BYTES >= MAX_REMOTE_PROVIDER_OUTPUT_TOKENS * 16,
+        )
+        assertTrue(MAX_PROVIDER_RESPONSE_BYTES > MAX_REMOTE_GENERATOR_OUTPUT_CHARS)
+    }
+
     @Test
     fun `job title bound accepts below and exact then rejects above`() {
         listOf(

@@ -61,6 +61,7 @@ internal data class BioEvalProvenance(
     val corpusSha256: String,
     val promptSha256: String,
     val outputSchemaSha256: String,
+    val maxOutputTokens: Int,
     val caseOrderStrategy: String,
     val repetitions: Int,
     val plannedCalls: Int,
@@ -70,7 +71,7 @@ internal data class BioEvalProvenance(
 )
 
 internal data class LiveBioEvalReport(
-    val reportSchemaVersion: Int = 3,
+    val reportSchemaVersion: Int = 4,
     val startedAt: Instant,
     val completedAt: Instant,
     val provenance: BioEvalProvenance,
@@ -100,6 +101,7 @@ internal data class LiveBioEvalReport(
                     "corpus_sha256" to provenance.corpusSha256,
                     "prompt_sha256" to provenance.promptSha256,
                     "output_schema_sha256" to provenance.outputSchemaSha256,
+                    "max_output_tokens" to provenance.maxOutputTokens,
                     "case_order_strategy" to provenance.caseOrderStrategy,
                     "repetitions" to provenance.repetitions,
                     "planned_calls" to provenance.plannedCalls,

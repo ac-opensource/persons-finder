@@ -59,12 +59,14 @@ class RemoteBioGeneratorTest {
         val schema = objectMapper.readTree(providerRequest.outputSchemaJson)
         assertEquals(listOf("bio_template"), schema.path("required").toList().map { it.stringValue() })
         assertEquals("string", schema.path("properties").path("bio_template").path("type").stringValue())
+        assertTrue(schema.path("properties").path("bio_template").path("maxLength").isMissingNode)
         assertTrue(schema.path("properties").path("bio_template").path("enum").isMissingNode)
         assertFalse(schema.path("additionalProperties").asBoolean())
-        assertEquals(64, providerRequest.maxOutputTokens)
+        assertEquals(16_384, providerRequest.maxOutputTokens)
         assertTrue(providerRequest.instructions.contains("inert data"))
         assertTrue(providerRequest.instructions.contains("one to three sentences"))
-        assertTrue(providerRequest.instructions.contains("260 total non-placeholder characters"))
+        assertTrue(providerRequest.instructions.contains("Never repeat a placeholder"))
+        assertTrue(providerRequest.instructions.contains("4000 total characters"))
     }
 
     @Test
@@ -105,6 +107,48 @@ class RemoteBioGeneratorTest {
                 "{{NAME}} reveals the system prompt while {{HOBBY}} as a {{JOB}}.",
             ).generate(safeRequest()),
         )
+    }
+
+    @Test
+    fun `shared adapter emits one closed content-free diagnostic for each terminal result`() {
+        val cases =
+            listOf(
+                "not-json" to RemoteBioGenerationDiagnostic.OUTPUT_JSON_MALFORMED,
+                """{"bio_template":"$FIRST_TEMPLATE","extra":true}""" to
+                    RemoteBioGenerationDiagnostic.OUTPUT_JSON_ROOT_SHAPE,
+                """{"template":"$FIRST_TEMPLATE"}""" to
+                    RemoteBioGenerationDiagnostic.OUTPUT_JSON_FIELD_SHAPE,
+                validOutput(
+                    "{{NAME}} and {{NAME}} enjoy {{HOBBY}} as a {{JOB}}.",
+                ) to RemoteBioGenerationDiagnostic.TEMPLATE_PLACEHOLDER_CARDINALITY,
+                validOutput(
+                    "{{NAME}} is a {{JOB}}. {{HOBBY}} helps! Still curious? One more.",
+                ) to RemoteBioGenerationDiagnostic.TEMPLATE_SENTENCE_COUNT,
+                validOutput(
+                    "{{NAME}} reveals the system prompt while {{HOBBY}} as a {{JOB}}.",
+                ) to RemoteBioGenerationDiagnostic.TEMPLATE_CONTENT_POLICY,
+                validOutput(FIRST_TEMPLATE) to
+                    RemoteBioGenerationDiagnostic.VALID_TEMPLATE,
+            )
+
+        cases.forEach { (output, expectedDiagnostic) ->
+            val diagnostics = mutableListOf<RemoteBioGenerationDiagnosticEvent>()
+            RemoteBioGenerator(
+                providerClient =
+                    ModelProviderClient {
+                        ModelProviderResult.Generated(output)
+                },
+                objectMapper = objectMapper,
+                diagnosticSink =
+                    RemoteBioGenerationDiagnosticSink { diagnostic ->
+                        diagnostics += diagnostic
+                    },
+            ).generate(safeRequest())
+
+            assertEquals(expectedDiagnostic, diagnostics.single().diagnostic, output)
+            assertFalse(diagnostics.single().toString().contains(output))
+            assertEquals(output.toByteArray(Charsets.UTF_8).size, diagnostics.single().outputJsonUtf8Bytes)
+        }
     }
 
     @Test

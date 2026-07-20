@@ -19,6 +19,7 @@ internal data class LiveBioEvalConfiguration(
     val codeRevision: String,
     val promptSha256: String,
     val outputSchemaSha256: String,
+    val maxOutputTokens: Int,
     val repetitions: Int,
     val maxCalls: Int,
     val minimumCallInterval: Duration,
@@ -39,6 +40,7 @@ internal data class LiveBioEvalConfiguration(
         require(SHA_256_PATTERN.matches(outputSchemaSha256)) {
             "Output schema hash must be lowercase SHA-256"
         }
+        require(maxOutputTokens > 0) { "Maximum output tokens must be positive" }
         require(repetitions > 0) { "Repetition count must be positive" }
         require(maxCalls > 0) { "Maximum call count must be positive" }
         require(!minimumCallInterval.isNegative) {
@@ -64,6 +66,7 @@ internal data class BioEvalCallPlan(
     val repetitions: Int,
     val plannedCalls: Int,
     val maxCalls: Int,
+    val maxOutputTokens: Int,
     val pacingStrategy: String,
     val minimumCallIntervalMillis: Long,
     val configuredMinimumCallStartSpanMillis: Long,
@@ -112,6 +115,7 @@ internal class LiveBioEvalRunner(
             repetitions = configuration.repetitions,
             plannedCalls = plannedCalls,
             maxCalls = configuration.maxCalls,
+            maxOutputTokens = configuration.maxOutputTokens,
             pacingStrategy = PACING_STRATEGY,
             minimumCallIntervalMillis = minimumCallIntervalMillis,
             configuredMinimumCallStartSpanMillis = configuredMinimumCallStartSpanMillis,
@@ -122,6 +126,8 @@ internal class LiveBioEvalRunner(
         corpus: BioEvalCorpus,
         configuration: LiveBioEvalConfiguration,
         generator: BioGenerator,
+        stopAfterAttempt: () -> Boolean = { false },
+        afterAttempt: (LiveBioEvalReport) -> Unit = {},
     ): LiveBioEvalReport {
         // The budget guard intentionally runs before the first provider invocation.
         val plan = planOnly(corpus, configuration)
@@ -159,13 +165,44 @@ internal class LiveBioEvalRunner(
                         deterministicCatalogMatch = classified.deterministicCatalogMatch,
                         latencyNanos = elapsedNanos,
                     )
-                if (classified.outcome == BioEvalOutcome.HARNESS_ERROR) {
+                afterAttempt(
+                    buildReport(
+                        corpus = corpus,
+                        configuration = configuration,
+                        plan = plan,
+                        startedAt = startedAt,
+                        attempts = attempts,
+                        pacer = pacer,
+                    ),
+                )
+                if (
+                    classified.outcome == BioEvalOutcome.HARNESS_ERROR ||
+                    stopAfterAttempt()
+                ) {
                     break@evaluation
                 }
             }
         }
 
-        return LiveBioEvalReport(
+        return buildReport(
+            corpus = corpus,
+            configuration = configuration,
+            plan = plan,
+            startedAt = startedAt,
+            attempts = attempts,
+            pacer = pacer,
+        )
+    }
+
+    private fun buildReport(
+        corpus: BioEvalCorpus,
+        configuration: LiveBioEvalConfiguration,
+        plan: BioEvalCallPlan,
+        startedAt: Instant,
+        attempts: List<AttemptAggregate>,
+        pacer: MinimumAttemptStartPacer,
+    ): LiveBioEvalReport =
+        LiveBioEvalReport(
             startedAt = startedAt,
             completedAt = clock.instant(),
             provenance =
@@ -178,6 +215,7 @@ internal class LiveBioEvalRunner(
                     corpusSha256 = corpus.sha256,
                     promptSha256 = configuration.promptSha256,
                     outputSchemaSha256 = configuration.outputSchemaSha256,
+                    maxOutputTokens = configuration.maxOutputTokens,
                     caseOrderStrategy = "cyclic_rotation_v1",
                     repetitions = configuration.repetitions,
                     plannedCalls = plan.plannedCalls,
@@ -205,7 +243,6 @@ internal class LiveBioEvalRunner(
                     .toSortedMap()
                     .mapValues { entry -> metricsFor(entry.value) },
         )
-    }
 
     private fun classify(result: BioGenerationResult): ClassifiedResult =
         when (result) {

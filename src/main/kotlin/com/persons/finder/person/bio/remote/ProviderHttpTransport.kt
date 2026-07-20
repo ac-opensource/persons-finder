@@ -38,7 +38,20 @@ internal class ProviderHttpResponse(
     val statusCode: Int,
     val body: String,
     val bodyTooLarge: Boolean = false,
+    val providerRequestId: String? = null,
+    val safeMetadataHeaders: Map<String, String> = emptyMap(),
 ) {
+    init {
+        require(
+            safeMetadataHeaders.all { (name, value) ->
+                name in SAFE_PROVIDER_METADATA_HEADERS &&
+                    SAFE_PROVIDER_METADATA_HEADER_VALUE.matches(value)
+            },
+        ) {
+            "Provider response metadata must use the closed safe scalar allowlist"
+        }
+    }
+
     override fun toString(): String = "ProviderHttpResponse(statusCode=$statusCode)"
 }
 
@@ -74,6 +87,27 @@ internal class JdkProviderHttpTransport(
             statusCode = response.statusCode(),
             body = (body as? BoundedProviderBody.Content)?.value.orEmpty(),
             bodyTooLarge = body is BoundedProviderBody.TooLarge,
+            providerRequestId =
+                PROVIDER_REQUEST_ID_HEADERS
+                    .firstNotNullOfOrNull { header ->
+                        response.headers().firstValue(header).orElse(null)
+                    },
+            safeMetadataHeaders =
+                response.headers()
+                    .map()
+                    .mapNotNull { (name, values) ->
+                        val normalizedName = name.lowercase()
+                        val value = values.singleOrNull()
+                        if (
+                            normalizedName in SAFE_PROVIDER_METADATA_HEADERS &&
+                            value != null &&
+                            SAFE_PROVIDER_METADATA_HEADER_VALUE.matches(value)
+                        ) {
+                            normalizedName to value
+                        } else {
+                            null
+                        }
+                    }.toMap(),
         )
     }
 }
@@ -180,5 +214,34 @@ internal fun failureForHttpStatus(statusCode: Int): BioGenerationFailure? =
         else -> BioGenerationFailure.UNAVAILABLE
     }
 
-internal const val MAX_PROVIDER_RESPONSE_BYTES = 65_536
+internal const val MAX_PROVIDER_RESPONSE_BYTES = 262_144
 private const val INITIAL_RESPONSE_BUFFER_BYTES = 8_192
+private val PROVIDER_REQUEST_ID_HEADERS =
+    listOf("x-request-id", "request-id", "x-goog-request-id")
+private val SAFE_PROVIDER_METADATA_HEADERS =
+    setOf(
+        "openai-processing-ms",
+        "retry-after",
+        "x-ratelimit-limit-requests",
+        "x-ratelimit-remaining-requests",
+        "x-ratelimit-reset-requests",
+        "x-ratelimit-limit-tokens",
+        "x-ratelimit-remaining-tokens",
+        "x-ratelimit-reset-tokens",
+        "anthropic-ratelimit-requests-limit",
+        "anthropic-ratelimit-requests-remaining",
+        "anthropic-ratelimit-requests-reset",
+        "anthropic-ratelimit-tokens-limit",
+        "anthropic-ratelimit-tokens-remaining",
+        "anthropic-ratelimit-tokens-reset",
+        "anthropic-ratelimit-input-tokens-limit",
+        "anthropic-ratelimit-input-tokens-remaining",
+        "anthropic-ratelimit-input-tokens-reset",
+        "anthropic-ratelimit-output-tokens-limit",
+        "anthropic-ratelimit-output-tokens-remaining",
+        "anthropic-ratelimit-output-tokens-reset",
+    )
+private val SAFE_PROVIDER_METADATA_HEADER_VALUE =
+    Regex(
+        """(?:[0-9]{1,20}(?:\.[0-9]{1,9})?(?:ms|s|m|h|d)?)+|[0-9T:.+Z-]{1,64}""",
+    )

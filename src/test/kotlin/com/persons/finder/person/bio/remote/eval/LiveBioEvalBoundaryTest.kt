@@ -84,7 +84,10 @@ class LiveBioEvalBoundaryTest {
                         },
                     provider = provider,
                     exactModelId = "model-v1",
+                    expectedCredential = "synthetic-secret",
                     maxCalls = 1,
+                    expectedFingerprint = fingerprint,
+                    objectMapper = objectMapper,
                 )
             val client =
                 provider.createClient(
@@ -99,6 +102,12 @@ class LiveBioEvalBoundaryTest {
             assertEquals(1, delegateCalls, provider.wireValue)
             assertEquals(1, inspector.delegatedHttpSendAttempts, provider.wireValue)
             assertEquals(emptyMap<String, Int>(), inspector.violationCounts, provider.wireValue)
+            assertEquals(1, inspector.providerRequestEvidence["request_count"])
+            assertEquals(
+                true,
+                inspector.providerRequestEvidence["all_requests_match_expected_configuration"],
+            )
+            assertEquals(1, inspector.providerResponseEvidence["attempt_count"])
         }
     }
 
@@ -115,9 +124,12 @@ class LiveBioEvalBoundaryTest {
                 delegate = delegate,
                 provider = LiveBioEvalProvider.OPENAI,
                 exactModelId = "model-v1",
+                expectedCredential = "synthetic-secret",
                 maxCalls = 1,
+                expectedFingerprint = fingerprint,
+                objectMapper = objectMapper,
             )
-        val valid = validOpenAiRequest(body = """{"store":false}""")
+        val valid = captureValidProviderHttpRequest(LiveBioEvalProvider.OPENAI)
 
         inspector.send(valid)
         assertThrows<IllegalStateException> {
@@ -134,17 +146,33 @@ class LiveBioEvalBoundaryTest {
                 delegate = delegate,
                 provider = LiveBioEvalProvider.OPENAI,
                 exactModelId = "model-v1",
+                expectedCredential = "synthetic-secret",
                 maxCalls = 1,
+                expectedFingerprint = fingerprint,
+                objectMapper = objectMapper,
             )
         assertThrows<IllegalStateException> {
             unsafeInspector.send(
-                validOpenAiRequest(body = """{"metadata":{"secret":"synthetic-secret"}}"""),
+                validOpenAiRequest(
+                    body =
+                        valid.body.dropLast(1) +
+                            ""","metadata":{"secret":"synthetic-secret"}}""",
+                ),
             )
         }
         assertEquals(
-            mapOf("http_forbidden_body_field" to 1),
+            mapOf(
+                "http_forbidden_body_field" to 1,
+                "http_provider_configuration" to 1,
+            ),
             unsafeInspector.violationCounts,
         )
+        assertEquals(1, unsafeInspector.providerRequestEvidence["request_count"])
+        assertEquals(
+            false,
+            unsafeInspector.providerRequestEvidence["all_requests_match_expected_configuration"],
+        )
+        assertEquals(0, unsafeInspector.providerResponseEvidence["attempt_count"])
         assertEquals(1, delegateCalls)
 
         val portInspector =
@@ -152,18 +180,105 @@ class LiveBioEvalBoundaryTest {
                 delegate = delegate,
                 provider = LiveBioEvalProvider.OPENAI,
                 exactModelId = "model-v1",
+                expectedCredential = "synthetic-secret",
                 maxCalls = 1,
+                expectedFingerprint = fingerprint,
+                objectMapper = objectMapper,
             )
         assertThrows<IllegalStateException> {
             portInspector.send(
                 validOpenAiRequest(
-                    body = """{"store":false}""",
+                    body = valid.body,
                     uri = URI.create("https://api.openai.com:8443/v1/responses"),
                 ),
             )
         }
-        assertEquals(mapOf("http_port" to 1), portInspector.violationCounts)
+        assertEquals(
+            mapOf(
+                "http_port" to 1,
+                "http_provider_configuration" to 1,
+            ),
+            portInspector.violationCounts,
+        )
         assertEquals(1, delegateCalls)
+    }
+
+    @Test
+    fun `HTTP inspector blocks changed allowed header values without retaining them`() {
+        var delegateCalls = 0
+        val inspector =
+            InspectingProviderHttpTransport(
+                delegate =
+                    ProviderHttpTransport {
+                        delegateCalls++
+                        ProviderHttpResponse(200, "{}")
+                    },
+                provider = LiveBioEvalProvider.OPENAI,
+                exactModelId = "model-v1",
+                expectedCredential = "synthetic-secret",
+                maxCalls = 1,
+                expectedFingerprint = fingerprint,
+                objectMapper = objectMapper,
+            )
+        val mutatedValue = "Bearer RAW-SECRET-PROFILE-VALUE"
+        val mutated =
+            captureValidProviderHttpRequest(LiveBioEvalProvider.OPENAI).let { request ->
+                ProviderHttpRequest(
+                    method = request.method,
+                    uri = request.uri,
+                    headers = request.headers + ("Authorization" to mutatedValue),
+                    body = request.body,
+                    timeout = request.timeout,
+                )
+            }
+
+        assertThrows<IllegalStateException> {
+            inspector.send(mutated)
+        }
+
+        assertEquals(0, delegateCalls)
+        assertEquals(
+            mapOf(
+                "http_header_values" to 1,
+                "http_provider_configuration" to 1,
+            ),
+            inspector.violationCounts,
+        )
+        assertEquals(0, inspector.providerResponseEvidence["attempt_count"])
+        val renderedEvidence = inspector.providerRequestEvidence.toString()
+        assertFalse(renderedEvidence.contains("RAW-SECRET"))
+        assertFalse(renderedEvidence.contains("synthetic-secret"))
+    }
+
+    @Test
+    fun `provider model validation rejects credential-shaped values without echoing them`() {
+        val validModels =
+            mapOf(
+                LiveBioEvalProvider.OPENAI to "gpt-5.6-luna",
+                LiveBioEvalProvider.GEMINI to "gemini-3.5-flash",
+                LiveBioEvalProvider.ANTHROPIC to "claude-sonnet-4-20250514",
+            )
+        validModels.forEach { (provider, model) ->
+            assertEquals(model, provider.requireValidModelId(model))
+        }
+
+        LiveBioEvalProvider.entries.forEach { provider ->
+            val secretLikeModel = "RAW-SECRET-${provider.name}-VALUE"
+            val invalidModel =
+                assertThrows<IllegalArgumentException> {
+                    provider.requireValidModelId(secretLikeModel)
+                }
+            assertFalse(invalidModel.message.orEmpty().contains(secretLikeModel))
+
+            val swappedCredential =
+                assertThrows<IllegalArgumentException> {
+                    provider.requireCredentialDistinctFromModel(
+                        credential = "same-secret",
+                        model = "same-secret",
+                    )
+                }
+            assertFalse(swappedCredential.message.orEmpty().contains("same-secret"))
+        }
     }
 
     private fun captureValidRequest(): ModelGenerationRequest {
@@ -196,6 +311,23 @@ class LiveBioEvalBoundaryTest {
             body = body,
             timeout = Duration.ofSeconds(5),
         )
+
+    private fun captureValidProviderHttpRequest(
+        provider: LiveBioEvalProvider,
+    ): ProviderHttpRequest {
+        var captured: ProviderHttpRequest? = null
+        provider.createClient(
+            credential = "synthetic-secret",
+            model = "model-v1",
+            objectMapper = objectMapper,
+            transport =
+                ProviderHttpTransport { request ->
+                    captured = request
+                    ProviderHttpResponse(200, "{}")
+                },
+        ).generate(captureValidRequest())
+        return checkNotNull(captured)
+    }
 
     private companion object {
         const val VALID_PROSE_OUTPUT =

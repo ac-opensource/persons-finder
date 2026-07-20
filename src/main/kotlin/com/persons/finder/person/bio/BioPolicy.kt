@@ -64,8 +64,8 @@ class BioPolicy {
     }
 
     companion object {
-        const val FINAL_BIO_MAX_CODE_POINTS = 480
-        const val MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS = 260
+        const val FINAL_BIO_MAX_CODE_POINTS = 4_220
+        const val MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS = 4_000
         const val MAX_SELECTED_SOURCE_CODE_POINTS =
             FINAL_BIO_MAX_CODE_POINTS - MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS
     }

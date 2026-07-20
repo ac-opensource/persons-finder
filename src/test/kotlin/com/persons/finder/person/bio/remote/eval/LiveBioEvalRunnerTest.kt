@@ -13,6 +13,7 @@ import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 import java.time.ZoneOffset
+import java.util.concurrent.CancellationException
 
 class LiveBioEvalRunnerTest {
     private val corpus = BioEvalCorpusLoader.load()
@@ -45,8 +46,9 @@ class LiveBioEvalRunnerTest {
             )
 
         assertEquals(24, calls)
-        assertEquals(3, report.reportSchemaVersion)
+        assertEquals(4, report.reportSchemaVersion)
         assertEquals(24, report.provenance.plannedCalls)
+        assertEquals(1_024, report.provenance.maxOutputTokens)
         assertEquals("minimum_attempt_start_interval_v1", report.provenance.pacingStrategy)
         assertEquals(0L, report.provenance.minimumCallIntervalMillis)
         assertEquals(0L, report.provenance.configuredMinimumCallStartSpanMillis)
@@ -140,13 +142,14 @@ class LiveBioEvalRunnerTest {
         )
 
         val sanitized = report.toSanitizedMap()
-        assertEquals(3, sanitized["report_schema_version"])
+        assertEquals(4, sanitized["report_schema_version"])
         val sanitizedProvenance = sanitized.getValue("provenance") as Map<*, *>
         assertEquals(
             "minimum_attempt_start_interval_v1",
             sanitizedProvenance["pacing_strategy"],
         )
         assertEquals(6_000L, sanitizedProvenance["minimum_call_interval_millis"])
+        assertEquals(1_024, sanitizedProvenance["max_output_tokens"])
         assertEquals(
             6_000L * (corpus.cases.size - 1),
             sanitizedProvenance["configured_minimum_call_start_span_millis"],
@@ -210,6 +213,69 @@ class LiveBioEvalRunnerTest {
                 .resultCounts
                 .getValue(BioEvalOutcome.RATE_LIMITED),
         )
+    }
+
+    @Test
+    fun `runner returns partial sanitized evidence after a classified terminal attempt`() {
+        var calls = 0
+        var terminal = false
+        val generator =
+            BioGenerator {
+                calls++
+                terminal = true
+                BioGenerationResult.Failure(BioGenerationFailure.UNAVAILABLE)
+            }
+
+        val report =
+            LiveBioEvalRunner(
+                clock = fixedClock(),
+                nanoTime = constantLatencyTicker(),
+            ).run(
+                corpus = corpus,
+                configuration = configuration(repetitions = 2, maxCalls = 24),
+                generator = generator,
+                stopAfterAttempt = { terminal },
+            )
+
+        assertEquals(1, calls)
+        assertEquals(1, report.overall.attempts)
+        assertEquals(1, report.overall.resultCounts[BioEvalOutcome.UNAVAILABLE])
+        assertFalse(report.toSanitizedMap().toString().contains("terminal"))
+    }
+
+    @Test
+    fun `runner checkpoints every completed paid attempt before propagating cancellation`() {
+        var calls = 0
+        val checkpointAttempts = mutableListOf<Int>()
+        val generator =
+            BioGenerator {
+                calls++
+                if (calls == 4) {
+                    throw CancellationException("RAW-SECRET-CANCELLATION-CONTENT")
+                }
+                BioGenerationResult.Template(validatedProse("checkpoint-$calls"))
+            }
+
+        assertThrows<CancellationException> {
+            LiveBioEvalRunner(
+                clock = fixedClock(),
+                nanoTime = constantLatencyTicker(),
+            ).run(
+                corpus = corpus,
+                configuration = configuration(repetitions = 1, maxCalls = 12),
+                generator = generator,
+                afterAttempt = { report ->
+                    checkpointAttempts += report.overall.attempts
+                    assertFalse(
+                        report.toSanitizedMap().toString()
+                            .contains("RAW-SECRET-CANCELLATION-CONTENT"),
+                    )
+                },
+            )
+        }
+
+        assertEquals(4, calls)
+        assertEquals(listOf(1, 2, 3), checkpointAttempts)
     }
 
     @Test
@@ -323,6 +389,7 @@ class LiveBioEvalRunnerTest {
             codeRevision = "0".repeat(40),
             promptSha256 = BioEvalHash.sha256("prompt-v1"),
             outputSchemaSha256 = BioEvalHash.sha256("schema-v1"),
+            maxOutputTokens = 1_024,
             repetitions = repetitions,
             maxCalls = maxCalls,
             minimumCallInterval = minimumCallInterval,

@@ -4,8 +4,6 @@ import com.persons.finder.person.bio.BIO_GENERATION_DEADLINE
 import com.persons.finder.person.bio.BioGenerationFailure
 import com.persons.finder.person.bio.BioGenerationResult
 import com.persons.finder.person.bio.BioTemplateRequest
-import com.persons.finder.person.bio.SafeInterestCode
-import com.persons.finder.person.bio.SafeJobCode
 import com.persons.finder.person.bio.remote.AnthropicModelProviderClient
 import com.persons.finder.person.bio.remote.GeminiModelProviderClient
 import com.persons.finder.person.bio.remote.JdkProviderHttpTransport
@@ -20,11 +18,8 @@ import com.persons.finder.person.bio.remote.ProviderHttpTransport
 import com.persons.finder.person.bio.remote.RemoteBioGenerator
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
-import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Duration
-import tools.jackson.core.StreamReadFeature
-import tools.jackson.databind.JsonNode
 import tools.jackson.databind.json.JsonMapper
 
 object LiveBioEvalMain {
@@ -40,7 +35,10 @@ object LiveBioEvalMain {
         val repetitions = requirePositiveInt(environment, "LIVE_AI_EVAL_REPETITIONS")
         val maxCalls = requirePositiveInt(environment, "LIVE_AI_EVAL_MAX_CALLS")
         val minimumCallInterval = requireLiveBioEvalMinimumCallInterval(environment)
-        val model = requireValue(environment, provider.modelEnvironmentName)
+        val model =
+            provider.requireValidModelId(
+                requireValue(environment, provider.modelEnvironmentName),
+            )
         val revision = LiveBioEvalRevision.capture()
         val maximumFailureUpperBound =
             environment("LIVE_AI_EVAL_MAX_FAILURE_UPPER_BOUND")
@@ -59,6 +57,7 @@ object LiveBioEvalMain {
                 codeRevision = revision.commit,
                 promptSha256 = fingerprint.promptSha256,
                 outputSchemaSha256 = fingerprint.outputSchemaSha256,
+                maxOutputTokens = fingerprint.maxOutputTokens,
                 repetitions = repetitions,
                 maxCalls = maxCalls,
                 minimumCallInterval = minimumCallInterval,
@@ -89,6 +88,7 @@ object LiveBioEvalMain {
                         maximumFailureUpperBound,
                     "prompt_sha256" to fingerprint.promptSha256,
                     "output_schema_sha256" to fingerprint.outputSchemaSha256,
+                    "max_output_tokens" to fingerprint.maxOutputTokens,
                 ),
             )
             return
@@ -104,15 +104,26 @@ object LiveBioEvalMain {
                 reason = requirement.reason,
             )
         }
+        requireEvidenceDirectoriesWritable(
+            liveAiEvalReportDirectory(),
+            liveAiEvalDurableReportDirectory().resolve(revision.commit),
+        )
 
         // Read only the selected provider credential, after every non-secret preflight check.
         val credential = requireValue(environment, provider.credentialEnvironmentName)
+        provider.requireCredentialDistinctFromModel(
+            credential = credential,
+            model = model,
+        )
         val transport =
             InspectingProviderHttpTransport(
                 delegate = JdkProviderHttpTransport(),
                 provider = provider,
                 exactModelId = model,
+                expectedCredential = credential,
                 maxCalls = plan.plannedCalls,
+                expectedFingerprint = fingerprint,
+                objectMapper = objectMapper,
             )
         val providerClient =
             provider.createClient(
@@ -127,50 +138,173 @@ object LiveBioEvalMain {
                 objectMapper = objectMapper,
                 expectedFingerprint = fingerprint,
             )
+        val applicationDiagnostics = LiveRemoteBioDiagnosticAccumulator()
+        fun writeEvidenceSnapshot(
+            report: LiveBioEvalReport,
+            executionFinalized: Boolean,
+        ): SanitizedLiveBioEval {
+            val sanitized =
+                buildSanitizedReport(
+                    report = report,
+                    plannedCalls = plan.plannedCalls,
+                    revision = revision,
+                    maximumFailureUpperBound = maximumFailureUpperBound,
+                    inspectedClient = inspectedClient,
+                    transport = transport,
+                    applicationDiagnostics = applicationDiagnostics,
+                    executionFinalized = executionFinalized,
+                )
+            writeReport(
+                objectMapper = objectMapper,
+                report = sanitized.value,
+                codeRevision = revision.commit,
+                provider = provider.wireValue,
+                exactModelId = model,
+                startedAt = report.startedAt,
+            )
+            return sanitized
+        }
         val report =
             runner.run(
                 corpus = corpus,
                 configuration = configuration,
-                generator = RemoteBioGenerator(inspectedClient, objectMapper),
+                generator =
+                    RemoteBioGenerator(
+                        inspectedClient,
+                        objectMapper,
+                        applicationDiagnostics,
+                    ),
+                stopAfterAttempt = {
+                    inspectedClient.violationCounts.values.sum() > 0 ||
+                        transport.violationCounts.values.sum() > 0 ||
+                        transport.terminalProviderFailureCategory != null
+                },
+                afterAttempt = { partialReport ->
+                    // Atomically overwrite the same durable run file after every completed
+                    // paid attempt, so cancellation preserves all prior metered evidence.
+                    writeEvidenceSnapshot(
+                        report = partialReport,
+                        executionFinalized = false,
+                    )
+                },
             )
+        val finalSanitized = writeEvidenceSnapshot(report, executionFinalized = true)
+        val reportPath = liveAiEvalReportDirectory().resolve("report.json")
+
+        println(
+            "Live AI evaluation completed: attempts=${report.overall.attempts}, " +
+                "failures=${report.overall.failureCount}, " +
+                "failureUpper95=${report.overall.oneSided95WilsonUpperFailureBound}, " +
+                "httpSendAttempts=${transport.delegatedHttpSendAttempts}, " +
+                "report=${reportPath.fileName}",
+        )
+        check(finalSanitized.passed) {
+            "Live AI evaluation gate failed; inspect the sanitized report"
+        }
+    }
+
+    private fun buildSanitizedReport(
+        report: LiveBioEvalReport,
+        plannedCalls: Int,
+        revision: LiveBioEvalRevision,
+        maximumFailureUpperBound: Double?,
+        inspectedClient: InspectingModelProviderClient,
+        transport: InspectingProviderHttpTransport,
+        applicationDiagnostics: LiveRemoteBioDiagnosticAccumulator,
+        executionFinalized: Boolean,
+    ): SanitizedLiveBioEval {
         val boundaryViolations =
             mergeCounts(
                 inspectedClient.violationCounts,
                 transport.violationCounts,
             )
         val boundaryViolationCount = boundaryViolations.values.sum()
+        val providerRequestEvidence = transport.providerRequestEvidence
+        val providerResponseEvidence = transport.providerResponseEvidence
+        val evidenceComplete =
+            providerRequestEvidence["request_count"] == transport.delegatedHttpSendAttempts &&
+                providerRequestEvidence["all_requests_match_expected_configuration"] == true &&
+                providerResponseEvidence["attempt_count"] == transport.delegatedHttpSendAttempts
+        val allPlannedCallsCompleted = report.overall.attempts == plannedCalls
         val harnessErrorCount =
             report.overall.resultCounts.getValue(BioEvalOutcome.HARNESS_ERROR)
         val reliabilityPassed =
             maximumFailureUpperBound == null ||
                 report.overall.oneSided95WilsonUpperFailureBound <= maximumFailureUpperBound
         val passed =
-            boundaryViolationCount == 0 &&
+            executionFinalized &&
+                boundaryViolationCount == 0 &&
                 harnessErrorCount == 0 &&
+                evidenceComplete &&
+                allPlannedCallsCompleted &&
+                transport.terminalProviderFailureCategory == null &&
                 reliabilityPassed
-        val sanitizedReport =
+        val stopReason =
+            if (!executionFinalized) {
+                "in_progress_checkpoint"
+            } else {
+                when {
+                    boundaryViolationCount > 0 -> "security_boundary"
+                    transport.terminalProviderFailureCategory != null ->
+                        "terminal_provider_failure"
+
+                    harnessErrorCount > 0 -> "harness_error"
+                    allPlannedCallsCompleted -> "completed"
+                    else -> "early_stop"
+                }
+            }
+        val value =
             linkedMapOf<String, Any>().apply {
                 putAll(report.toSanitizedMap())
                 put(
                     "execution",
                     linkedMapOf(
+                        "execution_finalized" to executionFinalized,
                         "model_provider_client_invocations" to
                             inspectedClient.providerClientInvocations,
+                        "stop_reason" to stopReason,
+                        "terminal_provider_failure_category" to
+                            transport.terminalProviderFailureCategory,
                         "delegated_http_send_attempts" to
                             transport.delegatedHttpSendAttempts,
                         "working_tree_clean" to revision.workingTreeClean,
                         "hard_boundary_violation_count" to boundaryViolationCount,
                         "hard_boundary_violation_counts" to boundaryViolations,
+                        "application_generation_diagnostics" to
+                            applicationDiagnostics.summary(),
+                        "provider_request_evidence" to providerRequestEvidence,
+                        "provider_response_evidence" to providerResponseEvidence,
+                    ),
+                )
+                val usageReportedResponseCount =
+                    (providerResponseEvidence["usage_reported_response_count"] as? Number)
+                        ?.toInt() ?: 0
+                val providerResponseCount =
+                    (providerResponseEvidence["response_count"] as? Number)?.toInt() ?: 0
+                put(
+                    "billing",
+                    linkedMapOf(
+                        "provider_usage_when_present_is_metering_evidence" to true,
+                        "provider_response_received" to (providerResponseCount > 0),
+                        "provider_usage_reported" to (usageReportedResponseCount > 0),
+                        "usage_reported_response_count" to usageReportedResponseCount,
+                        "metered_processing_evidenced" to
+                            (usageReportedResponseCount > 0),
+                        "actual_billed_usd" to null,
+                        "actual_billing_requires_provider_billing_export" to true,
                     ),
                 )
                 put(
                     "gate",
                     linkedMapOf<String, Any>(
+                        "execution_finalized" to executionFinalized,
                         "reliability_gate_configured" to
                             (maximumFailureUpperBound != null),
                         "synthetic_retention_and_data_use_approved" to true,
                         "hard_boundary_violations" to boundaryViolationCount,
                         "harness_errors" to harnessErrorCount,
+                        "evidence_complete" to evidenceComplete,
+                        "all_planned_calls_completed" to allPlannedCallsCompleted,
                         "passed" to passed,
                     ).apply {
                         maximumFailureUpperBound?.let { approvedBound ->
@@ -182,36 +316,44 @@ object LiveBioEvalMain {
                     },
                 )
             }
-        val reportPath = writeReport(objectMapper, sanitizedReport)
-
-        println(
-            "Live AI evaluation completed: attempts=${report.overall.attempts}, " +
-                "failures=${report.overall.failureCount}, " +
-                "failureUpper95=${report.overall.oneSided95WilsonUpperFailureBound}, " +
-                "httpSendAttempts=${transport.delegatedHttpSendAttempts}, report=$reportPath",
-        )
-        check(passed) {
-            "Live AI evaluation gate failed; inspect the sanitized report"
-        }
+        return SanitizedLiveBioEval(value = value, passed = passed)
     }
 
     private fun writeReport(
         objectMapper: JsonMapper,
         report: Map<String, Any>,
-    ): Path {
-        val reportDirectory =
-            Path.of(
-                System.getProperty(
-                    "liveAiEval.reportDir",
-                    "build/reports/live-ai-eval",
-                ),
-            )
-        Files.createDirectories(reportDirectory)
-        val reportPath = reportDirectory.resolve("report.json")
-        val json = objectMapper.writerWithDefaultPrettyPrinter().writeValueAsString(report)
-        Files.writeString(reportPath, "$json\n", StandardCharsets.UTF_8)
-        return reportPath.fileName
+        codeRevision: String,
+        provider: String,
+        exactModelId: String,
+        startedAt: java.time.Instant,
+    ): LiveEvidencePaths {
+        return writeSanitizedEvidenceCopies(
+            objectMapper = objectMapper,
+            report = report,
+            scratchPath = liveAiEvalReportDirectory().resolve("report.json"),
+            durableReportDirectory = liveAiEvalDurableReportDirectory(),
+            codeRevision = codeRevision,
+            provider = provider,
+            exactModelId = exactModelId,
+            startedAt = startedAt,
+        )
     }
+
+    private fun liveAiEvalReportDirectory(): Path =
+        Path.of(
+            System.getProperty(
+                "liveAiEval.reportDir",
+                "build/reports/live-ai-eval",
+            ),
+        )
+
+    private fun liveAiEvalDurableReportDirectory(): Path =
+        Path.of(
+            System.getProperty(
+                "liveAiEval.durableReportDir",
+                ".agents/evidence/live-ai-eval",
+            ),
+        )
 
     private fun printJson(
         objectMapper: JsonMapper,
@@ -254,6 +396,11 @@ object LiveBioEvalMain {
             ?: throw IllegalArgumentException(
                 "LIVE_AI_EVAL_MAX_FAILURE_UPPER_BOUND must be greater than zero and at most one",
             )
+
+    private data class SanitizedLiveBioEval(
+        val value: Map<String, Any>,
+        val passed: Boolean,
+    )
 }
 
 internal enum class LiveBioEvalProvider(
@@ -262,6 +409,7 @@ internal enum class LiveBioEvalProvider(
     val modelEnvironmentName: String,
     val expectedHost: String,
     val expectedHeaderNames: Set<String>,
+    private val modelIdPattern: Regex,
 ) {
     OPENAI(
         wireValue = "openai",
@@ -269,6 +417,7 @@ internal enum class LiveBioEvalProvider(
         modelEnvironmentName = "OPENAI_LIVE_MODEL",
         expectedHost = "api.openai.com",
         expectedHeaderNames = setOf("Authorization", "Content-Type"),
+        modelIdPattern = Regex("gpt-[A-Za-z0-9][A-Za-z0-9._-]{0,95}"),
     ),
     GEMINI(
         wireValue = "gemini",
@@ -276,6 +425,7 @@ internal enum class LiveBioEvalProvider(
         modelEnvironmentName = "GEMINI_LIVE_MODEL",
         expectedHost = "generativelanguage.googleapis.com",
         expectedHeaderNames = setOf("x-goog-api-key", "Content-Type"),
+        modelIdPattern = Regex("gemini-[A-Za-z0-9][A-Za-z0-9._-]{0,95}"),
     ),
     ANTHROPIC(
         wireValue = "anthropic",
@@ -283,6 +433,7 @@ internal enum class LiveBioEvalProvider(
         modelEnvironmentName = "ANTHROPIC_LIVE_MODEL",
         expectedHost = "api.anthropic.com",
         expectedHeaderNames = setOf("x-api-key", "anthropic-version", "Content-Type"),
+        modelIdPattern = Regex("claude-[A-Za-z0-9][A-Za-z0-9._-]{0,95}"),
     ),
     ;
 
@@ -295,6 +446,48 @@ internal enum class LiveBioEvalProvider(
                     ":generateContent"
 
             ANTHROPIC -> "/v1/messages"
+        }
+
+    fun requireValidModelId(value: String): String {
+        require(modelIdPattern.matches(value)) {
+            "$modelEnvironmentName must be a provider-specific model identifier"
+        }
+        return value
+    }
+
+    fun requireCredentialDistinctFromModel(
+        credential: String,
+        model: String,
+    ) {
+        require(credential != model) {
+            "The selected credential and model identifier must be different"
+        }
+    }
+
+    fun expectedHeaderValueFingerprints(credential: String): Map<String, String> =
+        expectedHeaderValues(credential)
+            .mapValues { (_, value) -> BioEvalHash.sha256(value) }
+
+    private fun expectedHeaderValues(credential: String): Map<String, String> =
+        when (this) {
+            OPENAI ->
+                mapOf(
+                    "Authorization" to "Bearer $credential",
+                    "Content-Type" to "application/json",
+                )
+
+            GEMINI ->
+                mapOf(
+                    "x-goog-api-key" to credential,
+                    "Content-Type" to "application/json",
+                )
+
+            ANTHROPIC ->
+                mapOf(
+                    "x-api-key" to credential,
+                    "anthropic-version" to "2023-06-01",
+                    "Content-Type" to "application/json",
+                )
         }
 
     fun createClient(
@@ -441,87 +634,61 @@ internal class InspectingModelProviderClient(
             if (request.maxOutputTokens != expectedFingerprint.maxOutputTokens) {
                 add("application_output_token_bound")
             }
-            if (!hasApprovedPayload(request.inputJson)) {
+            if (!hasApprovedLiveBioPayload(objectMapper, request.inputJson)) {
                 add("application_input_allowlist")
             }
         }
-
-    private fun hasApprovedPayload(inputJson: String): Boolean =
-        try {
-            val payload =
-                objectMapper.reader()
-                    .with(StreamReadFeature.STRICT_DUPLICATE_DETECTION)
-                    .readTree(inputJson)
-            payload.isObject &&
-                payload.propertyNames().asSequence().toSet() == APPROVED_INPUT_FIELDS &&
-                payload.text("display_name") == BioTemplateRequest.DISPLAY_NAME_TOKEN &&
-                payload.text("locale") == BioTemplateRequest.DEPLOYMENT_LOCALE &&
-                payload.text("country_code") == BioTemplateRequest.DEPLOYMENT_COUNTRY_CODE &&
-                payload.text("job_category") in APPROVED_JOB_CODES &&
-                payload.text("job_category_mapping_version") ==
-                BioTemplateRequest.JOB_MAPPING_VERSION &&
-                payload.approvedInterests() &&
-                payload.text("interest_category_mapping_version") ==
-                BioTemplateRequest.INTEREST_MAPPING_VERSION &&
-                payload.text("tone") == "quirky"
-        } catch (_: RuntimeException) {
-            false
-        }
-
-    private fun JsonNode.text(fieldName: String): String? =
-        get(fieldName)?.takeIf(JsonNode::isString)?.stringValue()
-
-    private fun JsonNode.approvedInterests(): Boolean {
-        val nodes =
-            get("interests")
-                ?.takeIf(JsonNode::isArray)
-                ?.toList()
-                ?: return false
-        if (nodes.isEmpty() || nodes.any { node -> !node.isString }) {
-            return false
-        }
-        val values = nodes.map(JsonNode::stringValue)
-        return values.all { value -> value in APPROVED_INTEREST_CODES } &&
-            values.distinct() == values
-    }
 
     private fun recordViolation(code: String) {
         mutableViolationCounts[code] = mutableViolationCounts.getOrDefault(code, 0) + 1
     }
 
-    private companion object {
-        val APPROVED_INPUT_FIELDS =
-            setOf(
-                "display_name",
-                "locale",
-                "country_code",
-                "job_category",
-                "job_category_mapping_version",
-                "interests",
-                "interest_category_mapping_version",
-                "tone",
-            )
-        val APPROVED_JOB_CODES = SafeJobCode.entries.mapTo(mutableSetOf(), SafeJobCode::wireValue)
-        val APPROVED_INTEREST_CODES =
-            SafeInterestCode.entries.mapTo(mutableSetOf(), SafeInterestCode::wireValue)
-    }
 }
 
 internal class InspectingProviderHttpTransport(
     private val delegate: ProviderHttpTransport,
     private val provider: LiveBioEvalProvider,
     private val exactModelId: String,
+    expectedCredential: String,
     private val maxCalls: Int,
+    expectedFingerprint: ApplicationRequestFingerprint,
+    objectMapper: JsonMapper,
 ) : ProviderHttpTransport {
     private val mutableViolationCounts = linkedMapOf<String, Int>()
+    private val expectedHeaderValueFingerprints =
+        provider.expectedHeaderValueFingerprints(expectedCredential)
+    private val evidence =
+        LiveProviderEvidenceAccumulator(
+            provider = provider,
+            exactModelId = exactModelId,
+            objectMapper = objectMapper,
+        )
+    private val requestEvidence =
+        LiveProviderRequestEvidenceAccumulator(
+            provider = provider,
+            exactModelId = exactModelId,
+            expectedHeaderValueFingerprints = expectedHeaderValueFingerprints,
+            expectedFingerprint = expectedFingerprint,
+            objectMapper = objectMapper,
+        )
     var delegatedHttpSendAttempts: Int = 0
         private set
 
     val violationCounts: Map<String, Int>
         get() = mutableViolationCounts.toMap()
+    val providerResponseEvidence: Map<String, Any>
+        get() = evidence.summary()
+    val providerRequestEvidence: Map<String, Any>
+        get() = requestEvidence.summary()
+    val terminalProviderFailureCategory: String?
+        get() = evidence.latestTerminalProviderFailureCategory
 
     override fun send(request: ProviderHttpRequest): ProviderHttpResponse {
         val violations = inspect(request).toMutableSet()
+        val sanitizedRequest = requestEvidence.record(request)
+        if (!sanitizedRequest.expectedConfigurationMatched) {
+            violations += "http_provider_configuration"
+        }
         if (delegatedHttpSendAttempts >= maxCalls) {
             violations += "http_call_budget"
         }
@@ -530,7 +697,21 @@ internal class InspectingProviderHttpTransport(
             throw IllegalStateException("Live AI request blocked by evaluation boundary")
         }
         delegatedHttpSendAttempts++
-        return delegate.send(request)
+        val startedAtNanos = System.nanoTime()
+        return try {
+            delegate.send(request).also { response ->
+                evidence.record(
+                    response = response,
+                    elapsedNanos = System.nanoTime() - startedAtNanos,
+                )
+            }
+        } catch (failure: Exception) {
+            evidence.recordTransportFailure(
+                failure = failure,
+                elapsedNanos = System.nanoTime() - startedAtNanos,
+            )
+            throw failure
+        }
     }
 
     private fun inspect(request: ProviderHttpRequest): Set<String> =
@@ -544,6 +725,9 @@ internal class InspectingProviderHttpTransport(
             if (request.uri.userInfo != null) add("http_user_info")
             if (request.uri.fragment != null) add("http_fragment")
             if (request.headers.keys != provider.expectedHeaderNames) add("http_header_names")
+            if (!request.headers.matchValueFingerprints(expectedHeaderValueFingerprints)) {
+                add("http_header_values")
+            }
             if (
                 request.timeout <= Duration.ZERO ||
                 request.timeout > BIO_GENERATION_DEADLINE
@@ -559,6 +743,12 @@ internal class InspectingProviderHttpTransport(
         mutableViolationCounts[code] = mutableViolationCounts.getOrDefault(code, 0) + 1
     }
 
+    private fun Map<String, String>.matchValueFingerprints(
+        expected: Map<String, String>,
+    ): Boolean =
+        keys == expected.keys &&
+            all { (name, value) -> BioEvalHash.sha256(value) == expected[name] }
+
     private companion object {
         val FORBIDDEN_BODY_PATTERN =
             Regex(
@@ -567,7 +757,7 @@ internal class InspectingProviderHttpTransport(
     }
 }
 
-private fun mergeCounts(
+internal fun mergeCounts(
     first: Map<String, Int>,
     second: Map<String, Int>,
 ): Map<String, Int> =

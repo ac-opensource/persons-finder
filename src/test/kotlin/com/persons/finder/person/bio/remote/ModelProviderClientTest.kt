@@ -38,9 +38,12 @@ class ModelProviderClientTest {
                     200,
                     """
                     {
+                      "object": "response",
                       "status": "completed",
                       "output": [{
                         "type": "message",
+                        "role": "assistant",
+                        "status": "completed",
                         "content": [{
                           "type": "output_text",
                           "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
@@ -89,6 +92,78 @@ class ModelProviderClientTest {
                 .path("additionalProperties")
                 .asBoolean(),
         )
+    }
+
+    @Test
+    fun `OpenAI GPT 5_6 disables reasoning for the bounded structured prose task`() {
+        val transport = RecordingTransport(validOpenAiResponse())
+
+        val result =
+            OpenAiModelProviderClient(
+                apiKey = "openai-test-credential",
+                model = "gpt-5.6-luna",
+                timeout = Duration.ofSeconds(7),
+                objectMapper = objectMapper,
+                transport = transport,
+            ).generate(request)
+
+        assertEquals(ModelProviderResult.Generated(VALID_PROSE_OUTPUT), result)
+        val body = objectMapper.readTree(requireNotNull(transport.request).body)
+        assertEquals("none", body.path("reasoning").path("effort").stringValue())
+    }
+
+    @Test
+    fun `OpenAI client ignores reasoning items and extracts the single final structured message`() {
+        val response =
+            ProviderHttpResponse(
+                200,
+                """
+                {
+                  "object": "response",
+                  "status": "completed",
+                  "output": [
+                    {"type": "reasoning", "id": "reasoning-item"},
+                    {
+                      "type": "message",
+                      "role": "assistant",
+                      "status": "completed",
+                      "content": [{
+                        "type": "output_text",
+                        "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
+                      }]
+                    }
+                  ]
+                }
+                """.trimIndent(),
+            )
+
+        assertEquals(
+            ModelProviderResult.Generated(VALID_PROSE_OUTPUT),
+            openAiClient(ProviderHttpTransport { response }).generate(request),
+        )
+    }
+
+    @Test
+    fun `OpenAI client rejects malformed completed response envelopes`() {
+        val malformedResponses =
+            listOf(
+                """{"status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"safe output"}]}]}""",
+                """{"object":"response","status":"completed","output":[{"type":"message","role":"user","status":"completed","content":[{"type":"output_text","text":"safe output"}]}]}""",
+                """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"in_progress","content":[{"type":"output_text","text":"safe output"}]}]}""",
+                """{"object":"response","status":"completed","output":{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"safe output"}]}}""",
+                """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":{"type":"output_text","text":"safe output"}}]}""",
+            )
+
+        malformedResponses.forEach { body ->
+            assertEquals(
+                ModelProviderResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
+                openAiClient(
+                    ProviderHttpTransport {
+                        ProviderHttpResponse(200, body)
+                    },
+                ).generate(request),
+            )
+        }
     }
 
     @Test
@@ -249,7 +324,7 @@ class ModelProviderClientTest {
                 ProviderHttpTransport {
                     ProviderHttpResponse(
                         200,
-                        """{"status":"completed","output":[{"type":"message","content":[{"type":"refusal","refusal":"not allowed"}]}]}""",
+                        """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"refusal","refusal":"not allowed"}]}]}""",
                     )
                 },
             ).generate(request),
@@ -493,7 +568,7 @@ class ModelProviderClientTest {
     private fun validOpenAiResponse() =
         ProviderHttpResponse(
             200,
-            """{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"}]}]}""",
+            """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"}]}]}""",
         )
 
     private fun validGeminiResponse() =

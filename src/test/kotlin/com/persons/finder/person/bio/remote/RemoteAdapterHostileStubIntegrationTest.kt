@@ -217,7 +217,7 @@ class RemoteAdapterHostileStubIntegrationTest {
         val body =
             when (provider) {
                 "openai" ->
-                    """{"status":"completed","output":[{"type":"message","content":[{"type":"output_text","text":$escaped}]}]}"""
+                    """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":$escaped}]}]}"""
 
                 "gemini" ->
                     """{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":$escaped}]}}]}"""
