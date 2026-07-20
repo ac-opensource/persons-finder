@@ -52,6 +52,7 @@ class LiveBioEvalRunnerTest {
         assertEquals(512, report.provenance.modelAuthoredCodePointLimit)
         assertEquals(220, report.provenance.maximumGroundingSourceCodePoints)
         assertEquals(732, report.provenance.finalGroundedCodePointLimit)
+        assertEquals(15_000L, report.provenance.generationDeadlineMillis)
         assertEquals(
             "maximum_approved_source_lengths_v1",
             report.provenance.groundingStrategy,
@@ -196,6 +197,7 @@ class LiveBioEvalRunnerTest {
         assertEquals(512, sanitizedProvenance["model_authored_code_point_limit"])
         assertEquals(220, sanitizedProvenance["maximum_grounding_source_code_points"])
         assertEquals(732, sanitizedProvenance["final_grounded_code_point_limit"])
+        assertEquals(15_000L, sanitizedProvenance["generation_deadline_millis"])
         assertEquals(
             "maximum_approved_source_lengths_v1",
             sanitizedProvenance["grounding_strategy"],
@@ -550,6 +552,7 @@ class LiveBioEvalRunnerTest {
         assertEquals(512, plan.modelAuthoredCodePointLimit)
         assertEquals(220, plan.maximumGroundingSourceCodePoints)
         assertEquals(732, plan.finalGroundedCodePointLimit)
+        assertEquals(15_000L, plan.generationDeadlineMillis)
         assertEquals("maximum_approved_source_lengths_v1", plan.groundingStrategy)
         assertEquals("minimum_attempt_start_interval_v1", plan.pacingStrategy)
         assertEquals(6_000L, plan.minimumCallIntervalMillis)

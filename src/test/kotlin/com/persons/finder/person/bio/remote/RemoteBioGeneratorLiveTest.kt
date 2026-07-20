@@ -1,5 +1,6 @@
 package com.persons.finder.person.bio.remote
 
+import com.persons.finder.person.bio.BIO_GENERATION_DEADLINE
 import com.persons.finder.person.bio.BioGenerationFailure
 import com.persons.finder.person.bio.BioGenerationResult
 import com.persons.finder.person.bio.BioPolicy
@@ -377,7 +378,7 @@ class RemoteBioGeneratorLiveTest {
             assertFalse(request.body.contains("\"cachedContent\""))
             assertFalse(request.body.contains("\"store\":true"))
             assertTrue(request.timeout > Duration.ZERO)
-            assertTrue(request.timeout <= Duration.ofSeconds(10))
+            assertTrue(request.timeout <= BIO_GENERATION_DEADLINE)
         }
     }
 

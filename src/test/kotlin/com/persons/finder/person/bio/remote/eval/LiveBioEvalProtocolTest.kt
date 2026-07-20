@@ -25,6 +25,7 @@ class LiveBioEvalProtocolTest {
                 maxOutputTokens = 256,
                 modelAuthoredCodePointLimit = 512,
                 finalGroundedCodePointLimit = 732,
+                generationDeadline = Duration.ofSeconds(15),
             )
         }
 
@@ -40,6 +41,7 @@ class LiveBioEvalProtocolTest {
             approved().copy(maxOutputTokens = 255),
             approved().copy(modelAuthoredCodePointLimit = 511),
             approved().copy(finalGroundedCodePointLimit = 731),
+            approved().copy(generationDeadline = Duration.ofSeconds(14)),
         ).forEach { invalid ->
             assertThrows<IllegalArgumentException> {
                 requireApprovedOpenAiReliabilityProtocol(
@@ -53,6 +55,7 @@ class LiveBioEvalProtocolTest {
                     maxOutputTokens = invalid.maxOutputTokens,
                     modelAuthoredCodePointLimit = invalid.modelAuthoredCodePointLimit,
                     finalGroundedCodePointLimit = invalid.finalGroundedCodePointLimit,
+                    generationDeadline = invalid.generationDeadline,
                 )
             }
         }
@@ -94,6 +97,7 @@ class LiveBioEvalProtocolTest {
             maxOutputTokens = 256,
             modelAuthoredCodePointLimit = 512,
             finalGroundedCodePointLimit = 732,
+            generationDeadline = Duration.ofSeconds(15),
         )
 
     private data class ProtocolValues(
@@ -107,5 +111,6 @@ class LiveBioEvalProtocolTest {
         val maxOutputTokens: Int,
         val modelAuthoredCodePointLimit: Int,
         val finalGroundedCodePointLimit: Int,
+        val generationDeadline: Duration,
     )
 }

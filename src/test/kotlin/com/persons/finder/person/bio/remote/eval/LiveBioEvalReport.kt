@@ -160,6 +160,7 @@ internal data class BioEvalProvenance(
     val maximumGroundingSourceCodePoints: Int,
     val finalGroundedCodePointLimit: Int,
     val groundingStrategy: String,
+    val generationDeadlineMillis: Long,
     val caseOrderStrategy: String,
     val repetitions: Int,
     val plannedCalls: Int,
@@ -187,6 +188,7 @@ internal data class LiveBioEvalReport(
         require(provenance.plannedCalls > 0)
         require(provenance.plannedCalls % provenance.repetitions == 0)
         require(provenance.maxOutputTokens > 0)
+        require(provenance.generationDeadlineMillis > 0)
         require(provenance.modelAuthoredCodePointLimit > 0)
         require(provenance.maximumGroundingSourceCodePoints > 0)
         require(
@@ -326,6 +328,8 @@ internal data class LiveBioEvalReport(
                     "final_grounded_code_point_limit" to
                         provenance.finalGroundedCodePointLimit,
                     "grounding_strategy" to provenance.groundingStrategy,
+                    "generation_deadline_millis" to
+                        provenance.generationDeadlineMillis,
                     "case_order_strategy" to provenance.caseOrderStrategy,
                     "repetitions" to provenance.repetitions,
                     "planned_calls" to provenance.plannedCalls,

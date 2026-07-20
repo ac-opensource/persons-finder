@@ -62,6 +62,7 @@ object LiveBioEvalMain {
                 repetitions = repetitions,
                 maxCalls = maxCalls,
                 minimumCallInterval = minimumCallInterval,
+                generationDeadline = BIO_GENERATION_DEADLINE,
             )
         val runner = LiveBioEvalRunner()
         val plan = runner.planOnly(corpus, configuration)
@@ -76,6 +77,7 @@ object LiveBioEvalMain {
             maxOutputTokens = fingerprint.maxOutputTokens,
             modelAuthoredCodePointLimit = plan.modelAuthoredCodePointLimit,
             finalGroundedCodePointLimit = plan.finalGroundedCodePointLimit,
+            generationDeadline = BIO_GENERATION_DEADLINE,
         )
 
         if (planOnly) {
@@ -100,6 +102,7 @@ object LiveBioEvalMain {
                     "final_grounded_code_point_limit" to
                         plan.finalGroundedCodePointLimit,
                     "grounding_strategy" to plan.groundingStrategy,
+                    "generation_deadline_millis" to plan.generationDeadlineMillis,
                     "pacing_strategy" to plan.pacingStrategy,
                     "minimum_call_interval_millis" to plan.minimumCallIntervalMillis,
                     "configured_minimum_call_start_span_millis" to
@@ -587,6 +590,7 @@ internal fun requireApprovedOpenAiReliabilityProtocol(
     maxOutputTokens: Int,
     modelAuthoredCodePointLimit: Int,
     finalGroundedCodePointLimit: Int,
+    generationDeadline: Duration,
 ) {
     require(provider == LiveBioEvalProvider.OPENAI) {
         "The approved aggregate protocol requires the OpenAI provider"
@@ -624,6 +628,9 @@ internal fun requireApprovedOpenAiReliabilityProtocol(
     require(finalGroundedCodePointLimit == APPROVED_RELIABILITY_FINAL_GROUNDED_CODE_POINTS) {
         "The approved aggregate protocol requires the calibrated 732-code-point final limit"
     }
+    require(generationDeadline == APPROVED_RELIABILITY_GENERATION_DEADLINE) {
+        "The approved aggregate protocol requires the evidence-backed 15-second deadline"
+    }
 }
 
 private const val APPROVED_OPENAI_RELIABILITY_MODEL = "gpt-5.6-luna"
@@ -634,6 +641,7 @@ private const val APPROVED_RELIABILITY_FAILURE_UPPER_BOUND = 0.01
 private const val APPROVED_RELIABILITY_MAX_OUTPUT_TOKENS = 256
 private const val APPROVED_RELIABILITY_MODEL_AUTHORED_CODE_POINTS = 512
 private const val APPROVED_RELIABILITY_FINAL_GROUNDED_CODE_POINTS = 732
+private val APPROVED_RELIABILITY_GENERATION_DEADLINE = Duration.ofSeconds(15)
 
 internal data class LiveBioEvalRevision(
     val commit: String,

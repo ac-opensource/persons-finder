@@ -66,6 +66,7 @@ class BioConfigurationTest {
 
     @Test
     fun `remote timeout accepts the exact application-owned deadline`() {
+        assertEquals(Duration.ofSeconds(15), BIO_GENERATION_DEADLINE)
         assertInstanceOf(
             RemoteBioGenerator::class.java,
             remoteGenerator(

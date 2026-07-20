@@ -24,7 +24,7 @@ class BioConfiguration {
         @Value("\${persons.runtime.mode}") runtimeMode: String,
         @Value("\${persons.bio.remote.provider:}") configuredProvider: String,
         @Value("\${persons.bio.remote.model:}") configuredModel: String,
-        @Value("\${persons.bio.remote.timeout:10s}") timeout: Duration,
+        @Value("\${persons.bio.remote.timeout:15s}") timeout: Duration,
         @Value("\${persons.bio.remote.openai.api-key:}") openAiApiKey: String,
         @Value("\${persons.bio.remote.gemini.api-key:}") geminiApiKey: String,
         @Value("\${persons.bio.remote.anthropic.api-key:}") anthropicApiKey: String,

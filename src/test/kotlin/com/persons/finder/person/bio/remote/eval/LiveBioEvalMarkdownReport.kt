@@ -120,6 +120,13 @@ internal object LiveBioEvalMarkdownReport {
                 "exception message, endpoint, or raw provider identifier.",
         )
         markdown.appendLine()
+        markdown.appendLine(
+            "The ignored JSON checkpoint retains the exhaustive sanitized machine " +
+                "facts. This review artifact keeps every aggregate and the key " +
+                "content-free validation, transport, and metering facts for every " +
+                "paid attempt without duplicating the raw machine record.",
+        )
+        markdown.appendLine()
 
         appendKeyValueTable(
             markdown,
@@ -151,6 +158,8 @@ internal object LiveBioEvalMarkdownReport {
                     provenance["maximum_grounding_source_code_points"],
                 "Final grounded limit (code points)" to
                     provenance["final_grounded_code_point_limit"],
+                "Application generation deadline (ms)" to
+                    provenance["generation_deadline_millis"],
             ),
         )
         appendScalarSection(markdown, "Acceptance gate", gate)
@@ -271,13 +280,6 @@ internal object LiveBioEvalMarkdownReport {
         markdown.appendLine("</details>")
         markdown.appendLine()
 
-        appendCompleteAttemptFacts(
-            markdown = markdown,
-            attempts = attempts,
-            requests = requests,
-            providerAttempts = providerAttempts,
-            applicationEvents = applicationEvents,
-        )
         appendReproduction(markdown, provenance, gate)
         markdown.appendLine("## Interpretation limits")
         markdown.appendLine()
@@ -359,59 +361,6 @@ internal object LiveBioEvalMarkdownReport {
                 }
             }
         markdown.appendLine()
-    }
-
-    private fun appendCompleteAttemptFacts(
-        markdown: StringBuilder,
-        attempts: List<Map<String, Any?>>,
-        requests: Map<Int, Map<String, Any?>>,
-        providerAttempts: Map<Int, Map<String, Any?>>,
-        applicationEvents: Map<Int, Map<String, Any?>>,
-    ) {
-        markdown.appendLine("## Complete sanitized per-attempt facts")
-        markdown.appendLine()
-        markdown.appendLine(
-            "This appendix preserves every scalar/list metric from the four " +
-                "content-safe per-attempt records. Repeated aggregate-only arrays are " +
-                "not duplicated.",
-        )
-        markdown.appendLine()
-        markdown.appendLine("<details>")
-        markdown.appendLine("<summary>Show complete sanitized fact matrix</summary>")
-        markdown.appendLine()
-        markdown.appendLine("| Call | Source | Metric | Value |")
-        markdown.appendLine("|---:|---|---|---|")
-        attempts.forEach { attempt ->
-            val index = attempt.int("attempt_index")
-            appendCompleteRecord(markdown, index, "evaluation", attempt)
-            appendCompleteRecord(markdown, index, "request", requests[index])
-            appendCompleteRecord(markdown, index, "provider", providerAttempts[index])
-            appendCompleteRecord(markdown, index, "application", applicationEvents[index])
-        }
-        markdown.appendLine()
-        markdown.appendLine("</details>")
-        markdown.appendLine()
-    }
-
-    private fun appendCompleteRecord(
-        markdown: StringBuilder,
-        attemptIndex: Int,
-        source: String,
-        record: Map<String, Any?>?,
-    ) {
-        if (record == null) {
-            markdown.appendLine(row(attemptIndex, source, "record", null))
-            return
-        }
-        val flattened = linkedMapOf<String, Any?>()
-        record.forEach { (key, value) -> flatten(key, value, flattened) }
-        if (flattened.isEmpty()) {
-            markdown.appendLine(row(attemptIndex, source, "record", null))
-        } else {
-            flattened.forEach { (metric, value) ->
-                markdown.appendLine(row(attemptIndex, source, metric, value))
-            }
-        }
     }
 
     private fun appendMetricsTable(

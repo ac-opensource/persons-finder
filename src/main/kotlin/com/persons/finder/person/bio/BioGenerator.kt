@@ -3,7 +3,7 @@ package com.persons.finder.person.bio
 import java.time.Duration
 import java.util.concurrent.CancellationException
 
-internal val BIO_GENERATION_DEADLINE: Duration = Duration.ofSeconds(10)
+internal val BIO_GENERATION_DEADLINE: Duration = Duration.ofSeconds(15)
 
 /**
  * Provider/model-neutral boundary. This typed request is the hard egress

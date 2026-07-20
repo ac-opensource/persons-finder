@@ -1,5 +1,6 @@
 package com.persons.finder.person.bio.remote.eval
 
+import com.persons.finder.person.bio.BIO_GENERATION_DEADLINE
 import com.persons.finder.person.bio.BioGenerationFailure
 import com.persons.finder.person.bio.BioGenerationResult
 import com.persons.finder.person.bio.BioGenerator
@@ -26,6 +27,7 @@ internal data class LiveBioEvalConfiguration(
     val repetitions: Int,
     val maxCalls: Int,
     val minimumCallInterval: Duration,
+    val generationDeadline: Duration = BIO_GENERATION_DEADLINE,
 ) {
     init {
         require(SAFE_METADATA_PATTERN.matches(provider)) {
@@ -48,6 +50,9 @@ internal data class LiveBioEvalConfiguration(
         require(maxCalls > 0) { "Maximum call count must be positive" }
         require(!minimumCallInterval.isNegative) {
             "Minimum live AI call interval cannot be negative"
+        }
+        require(!generationDeadline.isZero && !generationDeadline.isNegative) {
+            "Generation deadline must be positive"
         }
         require(minimumCallInterval <= MAXIMUM_LIVE_AI_EVAL_MIN_CALL_INTERVAL) {
             "Minimum live AI call interval cannot exceed 60000 milliseconds"
@@ -74,6 +79,7 @@ internal data class BioEvalCallPlan(
     val maximumGroundingSourceCodePoints: Int,
     val finalGroundedCodePointLimit: Int,
     val groundingStrategy: String,
+    val generationDeadlineMillis: Long,
     val pacingStrategy: String,
     val minimumCallIntervalMillis: Long,
     val configuredMinimumCallStartSpanMillis: Long,
@@ -129,6 +135,7 @@ internal class LiveBioEvalRunner(
                 BioPolicy.MAX_SELECTED_SOURCE_CODE_POINTS,
             finalGroundedCodePointLimit = BioPolicy.FINAL_BIO_MAX_CODE_POINTS,
             groundingStrategy = MAXIMUM_SYNTHETIC_GROUNDING_STRATEGY,
+            generationDeadlineMillis = configuration.generationDeadline.toMillis(),
             pacingStrategy = PACING_STRATEGY,
             minimumCallIntervalMillis = minimumCallIntervalMillis,
             configuredMinimumCallStartSpanMillis = configuredMinimumCallStartSpanMillis,
@@ -250,6 +257,7 @@ internal class LiveBioEvalRunner(
                         plan.maximumGroundingSourceCodePoints,
                     finalGroundedCodePointLimit = plan.finalGroundedCodePointLimit,
                     groundingStrategy = plan.groundingStrategy,
+                    generationDeadlineMillis = plan.generationDeadlineMillis,
                     caseOrderStrategy = "cyclic_rotation_v1",
                     repetitions = configuration.repetitions,
                     plannedCalls = plan.plannedCalls,
