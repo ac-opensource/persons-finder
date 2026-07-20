@@ -511,7 +511,7 @@ internal fun writeSanitizedEvidenceCopies(
     )
 }
 
-private fun writeAtomically(
+internal fun writeAtomically(
     destination: Path,
     content: String,
 ) {

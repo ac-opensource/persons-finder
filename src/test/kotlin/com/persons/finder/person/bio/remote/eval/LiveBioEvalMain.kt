@@ -20,6 +20,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Path
 import java.time.Duration
+import java.util.concurrent.CancellationException
 import tools.jackson.databind.json.JsonMapper
 
 object LiveBioEvalMain {
@@ -64,6 +65,18 @@ object LiveBioEvalMain {
             )
         val runner = LiveBioEvalRunner()
         val plan = runner.planOnly(corpus, configuration)
+        requireApprovedOpenAiReliabilityProtocol(
+            provider = provider,
+            exactModelId = model,
+            caseCount = corpus.cases.size,
+            repetitions = repetitions,
+            maxCalls = maxCalls,
+            minimumCallInterval = minimumCallInterval,
+            maximumFailureUpperBound = maximumFailureUpperBound,
+            maxOutputTokens = fingerprint.maxOutputTokens,
+            modelAuthoredCodePointLimit = plan.modelAuthoredCodePointLimit,
+            finalGroundedCodePointLimit = plan.finalGroundedCodePointLimit,
+        )
 
         if (planOnly) {
             printJson(
@@ -172,31 +185,33 @@ object LiveBioEvalMain {
             return sanitized
         }
         val report =
-            runner.run(
-                corpus = corpus,
-                configuration = configuration,
-                generator =
-                    RemoteBioGenerator(
-                        inspectedClient,
-                        objectMapper,
-                        applicationDiagnostics,
-                    ),
-                stopAfterAttempt = {
-                    inspectedClient.violationCounts.values.sum() > 0 ||
-                        transport.violationCounts.values.sum() > 0 ||
-                        transport.terminalProviderFailureCategory != null
-                },
-                afterAttempt = { partialReport ->
-                    // Atomically overwrite the same durable run file after every completed
-                    // paid attempt, so cancellation preserves all prior metered evidence.
-                    writeEvidenceSnapshot(
-                        report = partialReport,
-                        executionFinalized = false,
-                    )
-                },
-            )
+            runWithSanitizedLiveBioEvalCancellation {
+                runner.run(
+                    corpus = corpus,
+                    configuration = configuration,
+                    generator =
+                        RemoteBioGenerator(
+                            inspectedClient,
+                            objectMapper,
+                            applicationDiagnostics,
+                        ),
+                    stopAfterAttempt = {
+                        inspectedClient.violationCounts.values.sum() > 0 ||
+                            transport.violationCounts.values.sum() > 0 ||
+                            transport.terminalProviderFailureCategory != null
+                    },
+                    afterAttempt = { partialReport ->
+                        // Atomically overwrite the same durable run file after every completed
+                        // paid attempt, so cancellation preserves all prior metered evidence.
+                        writeEvidenceSnapshot(
+                            report = partialReport,
+                            executionFinalized = false,
+                        )
+                    },
+                )
+            }
         val finalSanitized = writeEvidenceSnapshot(report, executionFinalized = true)
-        val reportPath = liveAiEvalReportDirectory().resolve("report.json")
+        val reportPath = liveAiEvalReportDirectory().resolve("report.md")
 
         println(
             "Live AI evaluation completed: attempts=${report.overall.attempts}, " +
@@ -278,6 +293,12 @@ object LiveBioEvalMain {
                             transport.terminalProviderFailureCategory,
                         "delegated_http_send_attempts" to
                             transport.delegatedHttpSendAttempts,
+                        "attempted_calls" to report.overall.attempts,
+                        "not_attempted_calls" to
+                            (plannedCalls - report.overall.attempts).coerceAtLeast(0),
+                        "retries" to 0,
+                        "top_up_calls" to 0,
+                        "provider_fallbacks" to 0,
                         "working_tree_clean" to revision.workingTreeClean,
                         "hard_boundary_violation_count" to boundaryViolationCount,
                         "hard_boundary_violation_counts" to boundaryViolations,
@@ -338,11 +359,11 @@ object LiveBioEvalMain {
         provider: String,
         exactModelId: String,
         startedAt: java.time.Instant,
-    ): LiveEvidencePaths {
-        return writeSanitizedEvidenceCopies(
+    ): LiveBioEvalEvidencePaths {
+        return writeLiveBioEvalEvidenceCopies(
             objectMapper = objectMapper,
             report = report,
-            scratchPath = liveAiEvalReportDirectory().resolve("report.json"),
+            scratchJsonPath = liveAiEvalReportDirectory().resolve("report.json"),
             durableReportDirectory = liveAiEvalDurableReportDirectory(),
             codeRevision = codeRevision,
             provider = provider,
@@ -414,6 +435,15 @@ object LiveBioEvalMain {
         val passed: Boolean,
     )
 }
+
+internal fun <T> runWithSanitizedLiveBioEvalCancellation(block: () -> T): T =
+    try {
+        block()
+    } catch (_: CancellationException) {
+        throw CancellationException(
+            "Live AI evaluation cancelled; inspect the sanitized evidence checkpoints",
+        )
+    }
 
 internal enum class LiveBioEvalProvider(
     val wireValue: String,
@@ -545,6 +575,65 @@ internal enum class LiveBioEvalProvider(
                 )
     }
 }
+
+internal fun requireApprovedOpenAiReliabilityProtocol(
+    provider: LiveBioEvalProvider,
+    exactModelId: String,
+    caseCount: Int,
+    repetitions: Int,
+    maxCalls: Int,
+    minimumCallInterval: Duration,
+    maximumFailureUpperBound: Double?,
+    maxOutputTokens: Int,
+    modelAuthoredCodePointLimit: Int,
+    finalGroundedCodePointLimit: Int,
+) {
+    require(provider == LiveBioEvalProvider.OPENAI) {
+        "The approved aggregate protocol requires the OpenAI provider"
+    }
+    require(exactModelId == APPROVED_OPENAI_RELIABILITY_MODEL) {
+        "The approved aggregate protocol requires its exact reviewed model"
+    }
+    require(caseCount == APPROVED_RELIABILITY_CASES) {
+        "The approved aggregate protocol requires exactly 12 cases"
+    }
+    require(repetitions == APPROVED_RELIABILITY_REPETITIONS) {
+        "The approved aggregate protocol requires exactly 25 repetitions"
+    }
+    require(maxCalls == APPROVED_RELIABILITY_MAX_CALLS) {
+        "The approved aggregate protocol requires an exact 300-call ceiling"
+    }
+    require(
+        Math.multiplyExact(caseCount, repetitions) ==
+            APPROVED_RELIABILITY_MAX_CALLS,
+    ) {
+        "The approved aggregate protocol must plan exactly 300 calls"
+    }
+    require(minimumCallInterval == Duration.ZERO) {
+        "The approved aggregate protocol requires explicit unpaced execution"
+    }
+    require(maximumFailureUpperBound == APPROVED_RELIABILITY_FAILURE_UPPER_BOUND) {
+        "The approved aggregate protocol requires the precommitted 1% Wilson gate"
+    }
+    require(maxOutputTokens == APPROVED_RELIABILITY_MAX_OUTPUT_TOKENS) {
+        "The approved aggregate protocol requires the calibrated 256-token output ceiling"
+    }
+    require(modelAuthoredCodePointLimit == APPROVED_RELIABILITY_MODEL_AUTHORED_CODE_POINTS) {
+        "The approved aggregate protocol requires the calibrated 512-code-point authored limit"
+    }
+    require(finalGroundedCodePointLimit == APPROVED_RELIABILITY_FINAL_GROUNDED_CODE_POINTS) {
+        "The approved aggregate protocol requires the calibrated 732-code-point final limit"
+    }
+}
+
+private const val APPROVED_OPENAI_RELIABILITY_MODEL = "gpt-5.6-luna"
+private const val APPROVED_RELIABILITY_CASES = 12
+private const val APPROVED_RELIABILITY_REPETITIONS = 25
+private const val APPROVED_RELIABILITY_MAX_CALLS = 300
+private const val APPROVED_RELIABILITY_FAILURE_UPPER_BOUND = 0.01
+private const val APPROVED_RELIABILITY_MAX_OUTPUT_TOKENS = 256
+private const val APPROVED_RELIABILITY_MODEL_AUTHORED_CODE_POINTS = 512
+private const val APPROVED_RELIABILITY_FINAL_GROUNDED_CODE_POINTS = 732
 
 internal data class LiveBioEvalRevision(
     val commit: String,

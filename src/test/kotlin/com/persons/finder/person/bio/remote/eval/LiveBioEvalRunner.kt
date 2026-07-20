@@ -8,6 +8,8 @@ import com.persons.finder.person.bio.BioPolicy
 import com.persons.finder.person.bio.BioTemplateId
 import com.persons.finder.person.bio.GeneratedBio
 import com.persons.finder.person.bio.GeneratedBioTemplate
+import com.persons.finder.person.bio.modelAuthoredCodePointCount
+import com.persons.finder.person.bio.sentenceCount
 import com.persons.finder.person.model.PersonProfile
 import java.time.Clock
 import java.time.Duration
@@ -156,28 +158,34 @@ internal class LiveBioEvalRunner(
             val offset = repetition % corpus.cases.size
             val orderedCases =
                 corpus.cases.drop(offset) + corpus.cases.take(offset)
-            for (testCase in orderedCases) {
+            for ((slotIndex, testCase) in orderedCases.withIndex()) {
                 val startedNanos = pacer.awaitAttemptStart()
+                var cancellation: CancellationException? = null
                 val classified =
                     try {
                         classify(generator.generate(testCase.toRequest()))
                     } catch (exception: CancellationException) {
-                        throw exception
+                        cancellation = exception
+                        ClassifiedResult(BioEvalOutcome.CANCELLED)
                     } catch (_: RuntimeException) {
                         ClassifiedResult(BioEvalOutcome.HARNESS_ERROR)
                     }
                 val elapsedNanos = (nanoTime() - startedNanos).coerceAtLeast(0)
                 attempts +=
                     AttemptAggregate(
+                        round = repetition + 1,
+                        slot = slotIndex + 1,
                         caseId = testCase.id,
                         slices = testCase.slices,
                         outcome = classified.outcome,
-                        proseFingerprint = classified.proseFingerprint,
+                        outputIdentity = classified.outputIdentity,
+                        modelAuthoredCodePoints = classified.modelAuthoredCodePoints,
+                        sentenceCount = classified.sentenceCount,
                         deterministicCatalogMatch = classified.deterministicCatalogMatch,
                         finalGroundedCodePoints = classified.finalGroundedCodePoints,
                         latencyNanos = elapsedNanos,
                     )
-                afterAttempt(
+                val checkpoint =
                     buildReport(
                         corpus = corpus,
                         configuration = configuration,
@@ -185,8 +193,16 @@ internal class LiveBioEvalRunner(
                         startedAt = startedAt,
                         attempts = attempts,
                         pacer = pacer,
-                    ),
-                )
+                    )
+                try {
+                    afterAttempt(checkpoint)
+                } catch (checkpointFailure: RuntimeException) {
+                    cancellation?.addSuppressed(checkpointFailure)
+                    throw cancellation ?: checkpointFailure
+                }
+                cancellation?.let { exception ->
+                    throw exception
+                }
                 if (
                     classified.outcome == BioEvalOutcome.HARNESS_ERROR ||
                     stopAfterAttempt()
@@ -213,8 +229,9 @@ internal class LiveBioEvalRunner(
         startedAt: Instant,
         attempts: List<AttemptAggregate>,
         pacer: MinimumAttemptStartPacer,
-    ): LiveBioEvalReport =
-        LiveBioEvalReport(
+    ): LiveBioEvalReport {
+        val equivalenceIdsByOutput = linkedMapOf<GeneratedBioTemplate, String>()
+        return LiveBioEvalReport(
             startedAt = startedAt,
             completedAt = clock.instant(),
             provenance =
@@ -246,8 +263,25 @@ internal class LiveBioEvalRunner(
                 attempts.mapIndexed { index, attempt ->
                     BioEvalAttemptEvidence(
                         attemptIndex = index + 1,
+                        round = attempt.round,
+                        slot = attempt.slot,
                         caseId = attempt.caseId,
+                        sliceIds = attempt.slices,
                         outcome = attempt.outcome,
+                        outputEquivalenceId =
+                            attempt.outputIdentity?.let { output ->
+                                equivalenceIdsByOutput.getOrPut(output) {
+                                    "output-${
+                                        (equivalenceIdsByOutput.size + 1)
+                                            .toString()
+                                            .padStart(3, '0')
+                                    }"
+                                }
+                            },
+                        modelAuthoredCodePoints = attempt.modelAuthoredCodePoints,
+                        sentenceCount = attempt.sentenceCount,
+                        deterministicCatalogMatch =
+                            attempt.deterministicCatalogMatch,
                         finalGroundedCodePoints = attempt.finalGroundedCodePoints,
                     )
                 },
@@ -268,7 +302,13 @@ internal class LiveBioEvalRunner(
                     )
                     .toSortedMap()
                     .mapValues { entry -> metricsFor(entry.value) },
+            byRound =
+                attempts
+                    .groupBy(AttemptAggregate::round)
+                    .toSortedMap()
+                    .mapValues { entry -> metricsFor(entry.value) },
         )
+    }
 
     private fun classify(result: BioGenerationResult): ClassifiedResult =
         when (result) {
@@ -276,18 +316,28 @@ internal class LiveBioEvalRunner(
                 ClassifiedResult(result.reason.toEvalOutcome())
 
             is BioGenerationResult.Template -> {
-                val validated = GeneratedBioTemplate.validate(result.value.value)
-                if (validated != BioGenerationResult.Template(result.value)) {
+                val validatedTemplate =
+                    (
+                        GeneratedBioTemplate.validate(result.value.value)
+                            as? BioGenerationResult.Template
+                    )?.value
+                if (validatedTemplate != result.value) {
                     ClassifiedResult(BioEvalOutcome.INVALID_OUTPUT)
                 } else {
                     try {
                         val grounded =
-                            GeneratedBio.compose(result.value, MAXIMUM_SYNTHETIC_GROUNDING)
+                            GeneratedBio.compose(
+                                validatedTemplate,
+                                MAXIMUM_SYNTHETIC_GROUNDING,
+                            )
                         ClassifiedResult(
                             outcome = BioEvalOutcome.VALID_PROSE,
-                            proseFingerprint = BioEvalHash.sha256(result.value.value),
+                            outputIdentity = validatedTemplate,
+                            modelAuthoredCodePoints =
+                                validatedTemplate.modelAuthoredCodePointCount(),
+                            sentenceCount = validatedTemplate.sentenceCount(),
                             deterministicCatalogMatch =
-                                result.value in DETERMINISTIC_CATALOG_TEMPLATES,
+                                validatedTemplate in DETERMINISTIC_CATALOG_TEMPLATES,
                             finalGroundedCodePoints =
                                 grounded.value.codePointCount(0, grounded.value.length),
                         )
@@ -311,9 +361,9 @@ internal class LiveBioEvalRunner(
             attempts = attempts.size,
             validProseCount = validCount,
             distinctValidProseCount =
-                attempts.mapNotNull(AttemptAggregate::proseFingerprint).distinct().size,
+                attempts.mapNotNull(AttemptAggregate::outputIdentity).distinct().size,
             deterministicCatalogMatchCount =
-                attempts.count(AttemptAggregate::deterministicCatalogMatch),
+                attempts.count { attempt -> attempt.deterministicCatalogMatch == true },
             finalGroundedSizeReportedCount = groundedSizes.size,
             maximumFinalGroundedCodePoints = groundedSizes.maxOrNull() ?: 0,
             validResultsWithoutGroundedMeasurement = validCount - groundedSizes.size,
@@ -342,19 +392,25 @@ internal class LiveBioEvalRunner(
         }
 
     private data class AttemptAggregate(
+        val round: Int,
+        val slot: Int,
         val caseId: String,
         val slices: Set<String>,
         val outcome: BioEvalOutcome,
-        val proseFingerprint: String?,
-        val deterministicCatalogMatch: Boolean,
+        val outputIdentity: GeneratedBioTemplate?,
+        val modelAuthoredCodePoints: Int?,
+        val sentenceCount: Int?,
+        val deterministicCatalogMatch: Boolean?,
         val finalGroundedCodePoints: Int?,
         val latencyNanos: Long,
     )
 
     private data class ClassifiedResult(
         val outcome: BioEvalOutcome,
-        val proseFingerprint: String? = null,
-        val deterministicCatalogMatch: Boolean = false,
+        val outputIdentity: GeneratedBioTemplate? = null,
+        val modelAuthoredCodePoints: Int? = null,
+        val sentenceCount: Int? = null,
+        val deterministicCatalogMatch: Boolean? = null,
         val finalGroundedCodePoints: Int? = null,
     )
 

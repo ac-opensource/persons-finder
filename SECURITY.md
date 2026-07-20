@@ -135,14 +135,14 @@ review before any production use.
 
 The following controls are not implemented:
 
-- production reliability evidence for the remote model. A paid OpenAI
+- production-wide reliability evidence for the remote model. A paid OpenAI
   compatibility smoke initially exposed repeated placeholders; after the
   provider-side constraint was added, two three-call smokes and three separate
   12-case calibration runs produced 42 valid results with no retry or top-up.
-  The final 27 used the calibrated 256/512/732 limits; the latest aggregate
-  recorded all 12 maximum-source grounded lengths. Those small fixed runs
-  establish compatibility and support the limits, but they do not satisfy the
-  separately designed 456-call reliability protocol or predict future provider
+  The final 27 used the calibrated 256/512/732 limits; the latest calibration
+  recorded all 12 maximum-source grounded lengths. An approved 25-pass,
+  300-call fixed-corpus reliability run is pending. Even if it passes the 1%
+  overall Wilson gate, it cannot predict all future provider or production
   behavior;
 - authentication, authorization, tenant isolation, or ownership checks;
 - application-level rate limiting, quotas, or abuse prevention;

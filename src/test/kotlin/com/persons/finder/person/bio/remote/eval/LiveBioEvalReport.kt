@@ -9,6 +9,7 @@ internal enum class BioEvalOutcome(val wireValue: String) {
     UNAVAILABLE("unavailable"),
     INVALID_OUTPUT("invalid_output"),
     POLICY_REJECTED("policy_rejected"),
+    CANCELLED("cancelled"),
     HARNESS_ERROR("harness_error"),
 }
 
@@ -71,17 +72,59 @@ internal data class BioEvalMetrics(
 
 internal data class BioEvalAttemptEvidence(
     val attemptIndex: Int,
+    val round: Int,
+    val slot: Int,
     val caseId: String,
+    val sliceIds: Set<String>,
     val outcome: BioEvalOutcome,
+    val outputEquivalenceId: String?,
+    val modelAuthoredCodePoints: Int?,
+    val sentenceCount: Int?,
+    val deterministicCatalogMatch: Boolean?,
     val finalGroundedCodePoints: Int?,
 ) {
     init {
         require(attemptIndex > 0)
+        require(round > 0)
+        require(slot > 0)
         require(caseId.matches(Regex("[a-z0-9_-]{1,64}")))
+        require(sliceIds.isNotEmpty())
+        require(
+            sliceIds.all { sliceId ->
+                sliceId.matches(Regex("[a-z0-9_-]{1,64}"))
+            },
+        )
+        outputEquivalenceId?.let { equivalenceId ->
+            require(equivalenceId.matches(Regex("output-[0-9]{3,}")))
+            require(equivalenceId.substringAfter("output-").toIntOrNull() != null)
+            require(equivalenceId.substringAfter("output-").toInt() > 0)
+        }
+        val hasCompleteValidOutputEvidence =
+            outputEquivalenceId != null &&
+                modelAuthoredCodePoints != null &&
+                sentenceCount != null &&
+                deterministicCatalogMatch != null &&
+                finalGroundedCodePoints != null
         require(
             (outcome == BioEvalOutcome.VALID_PROSE) ==
-                (finalGroundedCodePoints != null),
+                hasCompleteValidOutputEvidence,
         )
+        require(
+            outcome == BioEvalOutcome.VALID_PROSE ||
+                listOf(
+                    outputEquivalenceId,
+                    modelAuthoredCodePoints,
+                    sentenceCount,
+                    deterministicCatalogMatch,
+                    finalGroundedCodePoints,
+                ).all { value -> value == null },
+        )
+        modelAuthoredCodePoints?.let { codePoints ->
+            require(codePoints > 0)
+        }
+        sentenceCount?.let { count ->
+            require(count in 1..3)
+        }
         finalGroundedCodePoints?.let { codePoints ->
             require(codePoints > 0)
         }
@@ -90,8 +133,15 @@ internal data class BioEvalAttemptEvidence(
     internal fun toSanitizedMap(): Map<String, Any?> =
         linkedMapOf(
             "attempt_index" to attemptIndex,
+            "round" to round,
+            "slot" to slot,
             "case_id" to caseId,
+            "slice_ids" to sliceIds.sorted(),
             "normalized_result" to outcome.wireValue,
+            "output_equivalence_id" to outputEquivalenceId,
+            "model_authored_code_points" to modelAuthoredCodePoints,
+            "sentence_count" to sentenceCount,
+            "deterministic_catalog_match" to deterministicCatalogMatch,
             "final_grounded_code_points" to finalGroundedCodePoints,
         )
 }
@@ -119,7 +169,7 @@ internal data class BioEvalProvenance(
 )
 
 internal data class LiveBioEvalReport(
-    val reportSchemaVersion: Int = 5,
+    val reportSchemaVersion: Int = 6,
     val startedAt: Instant,
     val completedAt: Instant,
     val provenance: BioEvalProvenance,
@@ -128,12 +178,129 @@ internal data class LiveBioEvalReport(
     val overall: BioEvalMetrics,
     val byCase: Map<String, BioEvalMetrics>,
     val bySlice: Map<String, BioEvalMetrics>,
+    val byRound: Map<Int, BioEvalMetrics>,
 ) {
+    init {
+        require(reportSchemaVersion == 6)
+        require(!completedAt.isBefore(startedAt))
+        require(provenance.repetitions > 0)
+        require(provenance.plannedCalls > 0)
+        require(provenance.plannedCalls % provenance.repetitions == 0)
+        require(provenance.maxOutputTokens > 0)
+        require(provenance.modelAuthoredCodePointLimit > 0)
+        require(provenance.maximumGroundingSourceCodePoints > 0)
+        require(
+            provenance.finalGroundedCodePointLimit ==
+                provenance.modelAuthoredCodePointLimit +
+                provenance.maximumGroundingSourceCodePoints,
+        )
+        require(attemptEvidence.isNotEmpty())
+        require(attemptEvidence.size <= provenance.plannedCalls)
+
+        val casesPerRound = provenance.plannedCalls / provenance.repetitions
+        require(
+            attemptEvidence.map(BioEvalAttemptEvidence::attemptIndex) ==
+                (1..attemptEvidence.size).toList(),
+        )
+        attemptEvidence.forEachIndexed { index, evidence ->
+            require(evidence.round == (index / casesPerRound) + 1)
+            require(evidence.slot == (index % casesPerRound) + 1)
+            require(evidence.round <= provenance.repetitions)
+            require(
+                evidence.modelAuthoredCodePoints == null ||
+                    evidence.modelAuthoredCodePoints <=
+                    provenance.modelAuthoredCodePointLimit,
+            )
+            require(
+                evidence.finalGroundedCodePoints == null ||
+                    evidence.finalGroundedCodePoints <=
+                    provenance.finalGroundedCodePointLimit,
+            )
+        }
+
+        val attemptsByRound = attemptEvidence.groupBy(BioEvalAttemptEvidence::round)
+        attemptsByRound.values.forEach { roundAttempts ->
+            require(roundAttempts.map(BioEvalAttemptEvidence::caseId).distinct().size ==
+                roundAttempts.size)
+        }
+        val firstRoundCaseIds =
+            attemptsByRound.getValue(1).map(BioEvalAttemptEvidence::caseId)
+        if (firstRoundCaseIds.size == casesPerRound) {
+            attemptEvidence.forEach { evidence ->
+                val expectedCaseIndex =
+                    (evidence.slot - 1 + evidence.round - 1) % casesPerRound
+                require(evidence.caseId == firstRoundCaseIds[expectedCaseIndex])
+            }
+        } else {
+            require(attemptEvidence.all { evidence -> evidence.round == 1 })
+        }
+
+        val firstSeenEquivalenceIds = linkedSetOf<String>()
+        attemptEvidence.mapNotNull(BioEvalAttemptEvidence::outputEquivalenceId)
+            .forEach { equivalenceId ->
+                if (firstSeenEquivalenceIds.add(equivalenceId)) {
+                    require(
+                        equivalenceId ==
+                            "output-${firstSeenEquivalenceIds.size.toString().padStart(3, '0')}",
+                    )
+                }
+            }
+        attemptEvidence
+            .filter { evidence -> evidence.outputEquivalenceId != null }
+            .groupBy(BioEvalAttemptEvidence::outputEquivalenceId)
+            .values
+            .forEach { equivalentOutputs ->
+                require(
+                    equivalentOutputs
+                        .map { evidence ->
+                            listOf(
+                                evidence.modelAuthoredCodePoints,
+                                evidence.sentenceCount,
+                                evidence.deterministicCatalogMatch,
+                                evidence.finalGroundedCodePoints,
+                            )
+                        }
+                        .distinct()
+                        .size == 1,
+                )
+            }
+
+        validateMetricsAgainstEvidence(overall, attemptEvidence)
+        val evidenceByCase =
+            attemptEvidence.groupBy(BioEvalAttemptEvidence::caseId).toSortedMap()
+        require(byCase.keys == evidenceByCase.keys)
+        byCase.forEach { (caseId, metrics) ->
+            val caseEvidence = evidenceByCase.getValue(caseId)
+            require(caseEvidence.map(BioEvalAttemptEvidence::sliceIds).distinct().size == 1)
+            validateMetricsAgainstEvidence(metrics, caseEvidence)
+        }
+        val evidenceBySlice =
+            attemptEvidence
+                .flatMap { evidence ->
+                    evidence.sliceIds.map { sliceId -> sliceId to evidence }
+                }
+                .groupBy(
+                    keySelector = { entry -> entry.first },
+                    valueTransform = { entry -> entry.second },
+                )
+                .toSortedMap()
+        require(bySlice.keys == evidenceBySlice.keys)
+        bySlice.forEach { (sliceId, metrics) ->
+            validateMetricsAgainstEvidence(metrics, evidenceBySlice.getValue(sliceId))
+        }
+        require(byRound.keys == attemptsByRound.keys)
+        require(byRound.keys.toList() == byRound.keys.sorted())
+        byRound.forEach { (round, metrics) ->
+            validateMetricsAgainstEvidence(metrics, attemptsByRound.getValue(round))
+        }
+    }
+
     /**
-     * Deliberately content-free. Attempt evidence contains only a sequence
-     * number, validated corpus case ID, normalized outcome, and optional numeric
-     * grounded length. It contains no case request, provider request, provider
-     * response, exception message, credential, or source profile value.
+     * Deliberately content-free. Attempt evidence contains only positional
+     * provenance, a validated corpus case ID, normalized outcome, a per-run
+     * equality-class label, and structural measurements of validated output.
+     * It contains no case request, provider request, provider response, prose,
+     * prose hash, exception message, credential, or source profile value.
      */
     fun toSanitizedMap(): Map<String, Any> =
         linkedMapOf(
@@ -178,5 +345,44 @@ internal data class LiveBioEvalReport(
             "overall" to overall.toSanitizedMap(),
             "by_case" to byCase.mapValues { entry -> entry.value.toSanitizedMap() },
             "by_slice" to bySlice.mapValues { entry -> entry.value.toSanitizedMap() },
+            "by_round" to
+                byRound.mapKeys { entry -> entry.key.toString() }
+                    .mapValues { entry -> entry.value.toSanitizedMap() },
         )
+
+    private fun validateMetricsAgainstEvidence(
+        metrics: BioEvalMetrics,
+        evidence: List<BioEvalAttemptEvidence>,
+    ) {
+        val expectedResultCounts =
+            BioEvalOutcome.entries.associateWith { outcome ->
+                evidence.count { attempt -> attempt.outcome == outcome }
+            }
+        val validEvidence =
+            evidence.filter { attempt -> attempt.outcome == BioEvalOutcome.VALID_PROSE }
+        val groundedSizes =
+            validEvidence.mapNotNull(BioEvalAttemptEvidence::finalGroundedCodePoints)
+        require(metrics.attempts == evidence.size)
+        require(metrics.validProseCount == validEvidence.size)
+        require(
+            metrics.distinctValidProseCount ==
+                validEvidence.mapNotNull(BioEvalAttemptEvidence::outputEquivalenceId)
+                    .distinct()
+                    .size,
+        )
+        require(
+            metrics.deterministicCatalogMatchCount ==
+                validEvidence.count { attempt ->
+                    attempt.deterministicCatalogMatch == true
+                },
+        )
+        require(metrics.finalGroundedSizeReportedCount == groundedSizes.size)
+        require(metrics.maximumFinalGroundedCodePoints == (groundedSizes.maxOrNull() ?: 0))
+        require(
+            metrics.validResultsWithoutGroundedMeasurement ==
+                validEvidence.size - groundedSizes.size,
+        )
+        require(metrics.failureCount == evidence.size - validEvidence.size)
+        require(metrics.resultCounts == expectedResultCounts)
+    }
 }

@@ -46,7 +46,7 @@ class LiveBioEvalRunnerTest {
             )
 
         assertEquals(24, calls)
-        assertEquals(5, report.reportSchemaVersion)
+        assertEquals(6, report.reportSchemaVersion)
         assertEquals(24, report.provenance.plannedCalls)
         assertEquals(1_024, report.provenance.maxOutputTokens)
         assertEquals(512, report.provenance.modelAuthoredCodePointLimit)
@@ -87,9 +87,19 @@ class LiveBioEvalRunnerTest {
             report.byCase.keys,
         )
         assertTrue(report.byCase.values.all { metrics -> metrics.attempts == 2 })
+        assertEquals(setOf(1, 2), report.byRound.keys)
+        assertTrue(report.byRound.values.all { metrics -> metrics.attempts == 12 })
         assertEquals(
             (1..24).toList(),
             report.attemptEvidence.map(BioEvalAttemptEvidence::attemptIndex),
+        )
+        assertEquals(
+            List(12) { 1 } + List(12) { 2 },
+            report.attemptEvidence.map(BioEvalAttemptEvidence::round),
+        )
+        assertEquals(
+            (1..12).toList() + (1..12).toList(),
+            report.attemptEvidence.map(BioEvalAttemptEvidence::slot),
         )
         assertEquals(
             corpus.cases.map(BioEvalCase::id) +
@@ -99,6 +109,10 @@ class LiveBioEvalRunnerTest {
         assertTrue(
             report.attemptEvidence.all { evidence ->
                 evidence.outcome == BioEvalOutcome.VALID_PROSE &&
+                    evidence.outputEquivalenceId != null &&
+                    evidence.modelAuthoredCodePoints != null &&
+                    evidence.sentenceCount == 1 &&
+                    evidence.deterministicCatalogMatch == false &&
                     evidence.finalGroundedCodePoints != null
             },
         )
@@ -167,7 +181,7 @@ class LiveBioEvalRunnerTest {
         )
 
         val sanitized = report.toSanitizedMap()
-        assertEquals(5, sanitized["report_schema_version"])
+        assertEquals(6, sanitized["report_schema_version"])
         assertEquals(
             "sanitized_metrics_no_request_or_response_content",
             sanitized["data_policy"],
@@ -202,16 +216,143 @@ class LiveBioEvalRunnerTest {
         assertEquals(
             setOf(
                 "attempt_index",
+                "round",
+                "slot",
                 "case_id",
+                "slice_ids",
                 "normalized_result",
+                "output_equivalence_id",
+                "model_authored_code_points",
+                "sentence_count",
+                "deterministic_catalog_match",
                 "final_grounded_code_points",
             ),
             firstAttempt.keys,
         )
         assertEquals(1, firstAttempt["attempt_index"])
+        assertEquals(1, firstAttempt["round"])
+        assertEquals(1, firstAttempt["slot"])
         assertEquals(corpus.cases.first().id, firstAttempt["case_id"])
+        assertEquals(corpus.cases.first().slices.sorted(), firstAttempt["slice_ids"])
         assertEquals("valid_prose", firstAttempt["normalized_result"])
+        assertEquals("output-001", firstAttempt["output_equivalence_id"])
+        assertTrue((firstAttempt["model_authored_code_points"] as Int) > 0)
+        assertEquals(1, firstAttempt["sentence_count"])
+        assertEquals(false, firstAttempt["deterministic_catalog_match"])
         assertTrue((firstAttempt["final_grounded_code_points"] as Int) > 0)
+        val sanitizedByRound = sanitized.getValue("by_round") as Map<*, *>
+        assertEquals(setOf("1"), sanitizedByRound.keys)
+    }
+
+    @Test
+    fun `runner assigns stable first-seen output equivalence ids without prose hashes`() {
+        val first = validatedProse("equivalence-alpha")
+        val second = validatedProse("equivalence-beta")
+        val outputs = listOf(first, first, second, first, second, second)
+        var calls = 0
+        val report =
+            LiveBioEvalRunner(
+                clock = fixedClock(),
+                nanoTime = constantLatencyTicker(),
+            ).run(
+                corpus = corpus,
+                configuration = configuration(repetitions = 1, maxCalls = 12),
+                generator =
+                    BioGenerator {
+                        BioGenerationResult.Template(outputs[calls++ % outputs.size])
+                    },
+            )
+
+        assertEquals(2, report.overall.distinctValidProseCount)
+        assertEquals(
+            listOf(
+                "output-001",
+                "output-001",
+                "output-002",
+                "output-001",
+                "output-002",
+                "output-002",
+                "output-001",
+                "output-001",
+                "output-002",
+                "output-001",
+                "output-002",
+                "output-002",
+            ),
+            report.attemptEvidence.map(BioEvalAttemptEvidence::outputEquivalenceId),
+        )
+        val sanitized = report.toSanitizedMap().toString()
+        assertFalse(sanitized.contains("equivalence-alpha"))
+        assertFalse(sanitized.contains("equivalence-beta"))
+        assertFalse(sanitized.contains(BioEvalHash.sha256(first.value)))
+        assertFalse(sanitized.contains(BioEvalHash.sha256(second.value)))
+    }
+
+    @Test
+    fun `runner aggregates each round independently`() {
+        var calls = 0
+        val report =
+            LiveBioEvalRunner(
+                clock = fixedClock(),
+                nanoTime = constantLatencyTicker(),
+            ).run(
+                corpus = corpus,
+                configuration = configuration(repetitions = 2, maxCalls = 24),
+                generator =
+                    BioGenerator {
+                        calls++
+                        if (calls <= corpus.cases.size) {
+                            BioGenerationResult.Template(validatedProse("round-one"))
+                        } else {
+                            BioGenerationResult.Failure(BioGenerationFailure.TIMEOUT)
+                        }
+                    },
+            )
+
+        assertEquals(12, report.byRound.getValue(1).validProseCount)
+        assertEquals(0, report.byRound.getValue(1).failureCount)
+        assertEquals(0, report.byRound.getValue(2).validProseCount)
+        assertEquals(12, report.byRound.getValue(2).failureCount)
+        assertEquals(
+            12,
+            report.byRound.getValue(2).resultCounts.getValue(BioEvalOutcome.TIMEOUT),
+        )
+        assertEquals(12, report.overall.validProseCount)
+        assertEquals(12, report.overall.failureCount)
+    }
+
+    @Test
+    fun `runner preserves all twenty five round aggregates and cyclic positions`() {
+        var calls = 0
+        val report =
+            LiveBioEvalRunner(
+                clock = fixedClock(),
+                nanoTime = constantLatencyTicker(),
+            ).run(
+                corpus = corpus,
+                configuration = configuration(repetitions = 25, maxCalls = 300),
+                generator =
+                    BioGenerator {
+                        calls++
+                        BioGenerationResult.Template(validatedProse("repeated"))
+                    },
+            )
+
+        assertEquals(300, calls)
+        assertEquals((1..25).toSet(), report.byRound.keys)
+        assertTrue(report.byRound.values.all { metrics -> metrics.attempts == 12 })
+        assertEquals(25, report.attemptEvidence.last().round)
+        assertEquals(12, report.attemptEvidence.last().slot)
+        assertEquals(
+            corpus.cases.map(BioEvalCase::id),
+            report.attemptEvidence.takeLast(12).map(BioEvalAttemptEvidence::caseId),
+        )
+        assertEquals(
+            setOf("output-001"),
+            report.attemptEvidence.mapNotNull(
+                BioEvalAttemptEvidence::outputEquivalenceId,
+            ).toSet(),
+        )
     }
 
     @Test
@@ -260,12 +401,20 @@ class LiveBioEvalRunnerTest {
         assertEquals(sequence.size, report.overall.failureCount)
         assertTrue(
             report.attemptEvidence.take(sequence.size).all { evidence ->
-                evidence.finalGroundedCodePoints == null
+                evidence.outputEquivalenceId == null &&
+                    evidence.modelAuthoredCodePoints == null &&
+                    evidence.sentenceCount == null &&
+                    evidence.deterministicCatalogMatch == null &&
+                    evidence.finalGroundedCodePoints == null
             },
         )
         assertTrue(
             report.attemptEvidence.drop(sequence.size).all { evidence ->
-                evidence.finalGroundedCodePoints != null
+                evidence.outputEquivalenceId != null &&
+                    evidence.modelAuthoredCodePoints != null &&
+                    evidence.sentenceCount != null &&
+                    evidence.deterministicCatalogMatch != null &&
+                    evidence.finalGroundedCodePoints != null
             },
         )
         assertEquals(
@@ -314,43 +463,62 @@ class LiveBioEvalRunnerTest {
     fun `runner checkpoints every completed paid attempt before propagating cancellation`() {
         var calls = 0
         val checkpointAttempts = mutableListOf<Int>()
+        var finalCheckpoint: LiveBioEvalReport? = null
+        val providerCancellation =
+            CancellationException("RAW-SECRET-CANCELLATION-CONTENT")
         val generator =
             BioGenerator {
                 calls++
                 if (calls == 4) {
-                    throw CancellationException("RAW-SECRET-CANCELLATION-CONTENT")
+                    throw providerCancellation
                 }
                 BioGenerationResult.Template(validatedProse("checkpoint-$calls"))
             }
 
-        assertThrows<CancellationException> {
-            LiveBioEvalRunner(
-                clock = fixedClock(),
-                nanoTime = constantLatencyTicker(),
-            ).run(
-                corpus = corpus,
-                configuration = configuration(repetitions = 1, maxCalls = 12),
-                generator = generator,
-                afterAttempt = { report ->
-                    checkpointAttempts += report.overall.attempts
-                    assertEquals(
-                        report.overall.validProseCount,
-                        report.overall.finalGroundedSizeReportedCount,
-                    )
-                    assertEquals(
-                        report.overall.attempts,
-                        report.attemptEvidence.size,
-                    )
-                    assertFalse(
-                        report.toSanitizedMap().toString()
-                            .contains("RAW-SECRET-CANCELLATION-CONTENT"),
-                    )
-                },
-            )
-        }
+        val cancellation =
+            assertThrows<CancellationException> {
+                LiveBioEvalRunner(
+                    clock = fixedClock(),
+                    nanoTime = constantLatencyTicker(),
+                ).run(
+                    corpus = corpus,
+                    configuration = configuration(repetitions = 1, maxCalls = 12),
+                    generator = generator,
+                    afterAttempt = { report ->
+                        checkpointAttempts += report.overall.attempts
+                        finalCheckpoint = report
+                        assertEquals(
+                            report.overall.validProseCount,
+                            report.overall.finalGroundedSizeReportedCount,
+                        )
+                        assertEquals(
+                            report.overall.attempts,
+                            report.attemptEvidence.size,
+                        )
+                        assertFalse(
+                            report.toSanitizedMap().toString()
+                                .contains("RAW-SECRET-CANCELLATION-CONTENT"),
+                        )
+                    },
+                )
+            }
 
         assertEquals(4, calls)
-        assertEquals(listOf(1, 2, 3), checkpointAttempts)
+        assertTrue(cancellation === providerCancellation)
+        assertEquals("RAW-SECRET-CANCELLATION-CONTENT", cancellation.message)
+        assertEquals(listOf(1, 2, 3, 4), checkpointAttempts)
+        val checkpoint = requireNotNull(finalCheckpoint)
+        assertEquals(1, checkpoint.overall.resultCounts[BioEvalOutcome.CANCELLED])
+        val cancelledAttempt = checkpoint.attemptEvidence.last()
+        assertEquals(BioEvalOutcome.CANCELLED, cancelledAttempt.outcome)
+        assertEquals(null, cancelledAttempt.outputEquivalenceId)
+        assertEquals(null, cancelledAttempt.modelAuthoredCodePoints)
+        assertEquals(null, cancelledAttempt.sentenceCount)
+        assertEquals(null, cancelledAttempt.deterministicCatalogMatch)
+        assertEquals(null, cancelledAttempt.finalGroundedCodePoints)
+        val sanitizedCheckpoint = checkpoint.toSanitizedMap().toString()
+        assertTrue(sanitizedCheckpoint.contains("cancelled"))
+        assertFalse(sanitizedCheckpoint.contains("RAW-SECRET-CANCELLATION-CONTENT"))
     }
 
     @Test
@@ -447,6 +615,83 @@ class LiveBioEvalRunnerTest {
         assertTrue(
             sanitizedReport.contains("sanitized_metrics_no_request_or_response_content"),
         )
+    }
+
+    @Test
+    fun `schema rejects incomplete output evidence and noncanonical run labels`() {
+        assertThrows<IllegalArgumentException> {
+            BioEvalAttemptEvidence(
+                attemptIndex = 1,
+                round = 1,
+                slot = 1,
+                caseId = "case-001",
+                sliceIds = setOf("job-coverage"),
+                outcome = BioEvalOutcome.VALID_PROSE,
+                outputEquivalenceId = null,
+                modelAuthoredCodePoints = null,
+                sentenceCount = null,
+                deterministicCatalogMatch = null,
+                finalGroundedCodePoints = null,
+            )
+        }
+        assertThrows<IllegalArgumentException> {
+            BioEvalAttemptEvidence(
+                attemptIndex = 1,
+                round = 1,
+                slot = 1,
+                caseId = "case-001",
+                sliceIds = setOf("job-coverage"),
+                outcome = BioEvalOutcome.TIMEOUT,
+                outputEquivalenceId = "output-001",
+                modelAuthoredCodePoints = 10,
+                sentenceCount = 1,
+                deterministicCatalogMatch = false,
+                finalGroundedCodePoints = 20,
+            )
+        }
+
+        val report =
+            LiveBioEvalRunner(
+                clock = fixedClock(),
+                nanoTime = constantLatencyTicker(),
+            ).run(
+                corpus = corpus,
+                configuration = configuration(repetitions = 1, maxCalls = 12),
+                generator =
+                    BioGenerator {
+                        BioGenerationResult.Template(validatedProse("canonical"))
+                    },
+            )
+        assertThrows<IllegalArgumentException> {
+            report.copy(
+                attemptEvidence =
+                    report.attemptEvidence.mapIndexed { index, evidence ->
+                        if (index == 0) {
+                            evidence.copy(outputEquivalenceId = "output-002")
+                        } else {
+                            evidence
+                        }
+                    },
+            )
+        }
+        assertThrows<IllegalArgumentException> {
+            report.copy(bySlice = emptyMap())
+        }
+        assertThrows<IllegalArgumentException> {
+            report.copy(
+                attemptEvidence =
+                    report.attemptEvidence.mapIndexed { index, evidence ->
+                        if (index == 1) {
+                            evidence.copy(
+                                modelAuthoredCodePoints =
+                                    evidence.modelAuthoredCodePoints!! + 1,
+                            )
+                        } else {
+                            evidence
+                        }
+                    },
+            )
+        }
     }
 
     private fun validatedProse(label: String): GeneratedBioTemplate =

@@ -49,28 +49,28 @@ profile content is serialized to evidence.
 
 ## Plan without network access
 
-Choose exactly one provider and its exact approved model. The following
-credential-free command preserves the separately designed Gemini reliability
-protocol for review. It does not authorize its 456 provider calls:
+Choose exactly one provider and its exact approved model. The approved OpenAI
+reliability protocol uses 25 complete passes over the 12-case corpus. Plan mode
+is credential-free and makes no provider call:
 
 ```bash
-LIVE_AI_PROVIDER=gemini \
-LIVE_AI_EVAL_REPETITIONS=38 \
-LIVE_AI_EVAL_MAX_CALLS=456 \
-LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS=6000 \
+LIVE_AI_PROVIDER=openai \
+LIVE_AI_EVAL_REPETITIONS=25 \
+LIVE_AI_EVAL_MAX_CALLS=300 \
+LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS=0 \
 LIVE_AI_EVAL_MAX_FAILURE_UPPER_BOUND=0.01 \
-GEMINI_LIVE_MODEL='gemini-2.5-flash-lite' \
-./gradlew liveAiEval --args='--plan'
+OPENAI_LIVE_MODEL='gpt-5.6-luna' \
+./gradlew --no-daemon liveAiEval --args='--plan'
 ```
 
 Plan mode validates the corpus, derives the current Git revision and
 application-request fingerprints, checks the maximum-call authorization and
 pacing configuration, and prints only sanitized metadata. Its output includes
 `pacing_strategy`, `minimum_call_interval_millis`, and the derived
-`configured_minimum_call_start_span_millis`; for 456 calls at 6,000
-milliseconds the minimum first-to-last attempt-start span is 2,730,000
-milliseconds. Plan mode does not require a provider credential or the live-run
-confirmations.
+`configured_minimum_call_start_span_millis`. The approved unpaced OpenAI plan
+must report exactly 12 cases, 25 repetitions, 300 planned and maximum calls,
+and a zero configured start span. Plan mode does not require a provider
+credential or the live-run confirmations.
 
 ## Live smoke commands
 
@@ -119,21 +119,22 @@ build/reports/live-ai-smoke/report.json
 ```
 
 After a successful compatibility smoke, first review its observed maxima and
-precommit the resulting output ceiling and aggregate spend bound. A separately
-approved aggregate can then be run. The designed Gemini reliability command is:
+precommit the resulting output ceiling and aggregate spend bound. The approved
+OpenAI 12-by-25 reliability command is:
 
 ```bash
-LIVE_AI_PROVIDER=gemini \
-LIVE_AI_EVAL_REPETITIONS=38 \
-LIVE_AI_EVAL_MAX_CALLS=456 \
-LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS=6000 \
+LIVE_AI_PROVIDER=openai \
+LIVE_AI_EVAL_REPETITIONS=25 \
+LIVE_AI_EVAL_MAX_CALLS=300 \
+LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS=0 \
 LIVE_AI_EVAL_MAX_FAILURE_UPPER_BOUND=0.01 \
 RUN_LIVE_AI_TESTS=true \
-GEMINI_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED=true \
+OPENAI_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED=true \
 LIVE_AI_AUTOMATIC_TELEMETRY_DISABLED_CONFIRMED=true \
 LIVE_AI_APPLICATION_REQUEST_INSPECTION_CONFIRMED=true \
-GEMINI_LIVE_MODEL='gemini-2.5-flash-lite' \
-./gradlew liveAiEval
+OPENAI_LIVE_MODEL='gpt-5.6-luna' \
+OPENAI_API_KEY="$(<.secrets/openai-api-key)" \
+./gradlew --no-daemon liveAiEval
 ```
 
 The provider-specific approval means that the human owner accepts provider
@@ -144,15 +145,15 @@ does not assert that provider logging is disabled. It does not authorize
 production or customer-derived content, and it cannot satisfy the separate
 production privacy, retention, residency, and subprocessor review.
 
-The approved OpenAI investigation has a hard cumulative provider-usage cost
-ceiling of USD 50. Fixed calibration reruns are permitted when preceding
-sanitized evidence leaves a material truncation or compatibility question
-unresolved. The 456-call reliability aggregate remains a separate protocol and
-is not necessary merely to select a production output ceiling. Do not combine
-providers or select a provider after comparing aggregate results. Anthropic uses the corresponding
-`ANTHROPIC_*` variables if separately selected and approved. The evaluator
-reads only the selected provider credential and constructs only that provider
-client. For the paid OpenAI calibration, explicitly set
+The approved OpenAI investigation and 300-call reliability run have a hard
+cumulative provider-usage cost ceiling of USD 50. Fixed reruns are permitted
+when preceding sanitized evidence exposes a material implementation or
+compatibility defect; each run keeps its precommitted call budget and never
+tops up. Do not combine providers or select a provider after comparing
+aggregate results. Anthropic uses the corresponding `ANTHROPIC_*` variables if
+separately selected and approved. The evaluator reads only the selected
+provider credential and constructs only that provider client. For paid OpenAI
+execution, explicitly set
 `LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS=0` in both plan and execution; the human
 owner determined that quota pacing is unnecessary for paid calls.
 
@@ -188,24 +189,25 @@ control; it is the approved value for the paid OpenAI calibration. Any resulting
 rate-limit outcome still counts as a failure and is never retried.
 
 The three-call live adapter smoke is compatibility and request-boundary
-preflight. It is not pooled into the 456 aggregate attempts. Let the applicable
+preflight. It is not pooled into the 300 aggregate attempts. Let the applicable
 quota window clear between smoke and aggregate runs.
 
-## Separately designed reliability gate
+## Reliability gate
 
-The separately designed target is an overall one-sided 95% Wilson upper failure
-bound of 1%. It was not executed for this limit-calibration task; any future run
-must precommit its provider, model, call budget, pacing, and spend bound:
+The approved target is an overall one-sided 95% Wilson upper failure bound of
+1%. Every run precommits its provider, model, call budget, pacing, and spend
+bound:
 
 ```bash
 LIVE_AI_EVAL_MAX_FAILURE_UPPER_BOUND=0.01
 ```
 
-At 456 attempts, zero failures has an upper bound of approximately 0.5898% and
-one failure approximately 0.9769%, so both pass. Two failures has an upper bound
-of approximately 1.3166% and fails. Thus this exact protocol accepts at most one
-failure. The 456 calls are the smallest realizable 12-case multiple for which
-one observed failure can still satisfy the approved 1% criterion.
+At 300 attempts, zero failures has an upper bound of approximately 0.8938% and
+passes. One failure has an upper bound of approximately 1.4801% and fails.
+Thus this exact 12-case-by-25-repetition protocol accepts no observed failure
+and never adds replacement calls. A zero-failure per-case sample contains only
+25 observations and has an approximately 9.7654% upper bound, so the 0.8938%
+claim applies only to the overall equally weighted fixed corpus.
 
 The target remains an explicit environment value rather than a hidden default.
 Hard request-boundary violations and harness errors always fail the command
@@ -219,19 +221,23 @@ The evaluator writes:
 ```text
 build/reports/live-ai-smoke/report.json
 build/reports/live-ai-eval/report.json
+build/reports/live-ai-eval/report.md
 .agents/evidence/live-ai-smoke/<full-revision>/<timestamp>-<provider>-<model-hash>-report.json
 .agents/evidence/live-ai-eval/<full-revision>/<timestamp>-<provider>-<model-hash>-report.json
+.agents/evidence/live-ai-eval/<full-revision>/<timestamp>-<provider>-<model-hash>-report.md
 ```
 
-Each run writes identical sanitized JSON to the scratch `build/` path and the
-timestamped ignored `.agents/evidence/` archive. The latter survives `clean` and
-prevents a paid run from being lost before review. Both destinations are
-write-tested before the first provider call. After a privacy/evidence review,
-copy that exact archived JSON to `docs/evidence/live-ai/` with the provider,
-full code revision, and run kind in the filename. Commit only that reviewed
-JSON, never Gradle HTML/JUnit output or raw provider content.
+The evaluator writes interruption-safe sanitized JSON checkpoints only to
+ignored scratch/archive paths. It also renders the same sanitized facts into a
+human-readable Markdown checkpoint. The ignored archive survives `clean` and
+prevents a paid run from being lost before review; every destination is
+write-tested before the first provider call. After a privacy and
+evidence-integrity review, copy only the final Markdown report to
+`docs/evidence/live-ai/` with the provider, full code revision, and run shape in
+the filename. Raw JSON, Gradle HTML/JUnit output, prompts, and provider content
+remain untracked.
 
-The current harness emits aggregate report schema version 5. With the live
+The current harness emits aggregate report schema version 6. With the live
 execution/evidence extension, it contains:
 
 - provider, exact model ID, clean Git revision, corpus version and hash;
@@ -252,15 +258,14 @@ execution/evidence extension, it contains:
   structured-output mode, output-token allowance, reasoning/thinking settings,
   sampling/seed/stop settings, and unexpected-field counts;
 - results by normalized failure category;
-- per-case, per-slice, and overall observed failure rates;
+- per-round, per-case, per-slice, and overall observed failure rates;
 - one-sided 95% Wilson upper failure bounds;
 - latency p50, p95, and maximum;
-- valid-prose, distinct-valid-prose, and deterministic-catalog-match counts,
-  with only those aggregate counts serialized; prose and individual
-  fingerprints are not retained;
-- one content-free record per completed attempt containing only its sequence,
-  safe corpus case ID, normalized result, and final grounded code-point count
-  when valid;
+- valid-prose, distinct-valid-prose, and deterministic-catalog-match counts;
+- one content-free record per completed attempt containing its sequence,
+  one-based round and slot, safe corpus case ID, normalized result, opaque
+  per-run output-equivalence ID, sentence and length metrics, catalog-match
+  flag, and final grounded code-point count when valid;
 - per-case, per-slice, and overall grounded-length measurement counts, maxima,
   and valid-result missing-measurement counts;
 - provider HTTP status classes, closed response/finish/incomplete categories,
@@ -275,12 +280,13 @@ execution/evidence extension, it contains:
 - sanitized hard-boundary and harness-error counts; and
 - the boolean synthetic retention/data-use approval that authorized the run.
 
-The two earlier tracked paid aggregate reports below remain unchanged
-schema-version-4 evidence and were not backfilled. They do not contain
-grounded-length fields; their absence means unknown, not zero. Version 5
-measures the already required composition against synthetic strings at the
-maximum approved source lengths; these numbers are structural worst-case
-measurements, not customer profile lengths.
+The two historical schema-version-4 aggregate checkpoints were not backfilled
+and did not contain grounded-length fields; absence means unknown, not zero.
+Schema version 5 added the already required composition measurement against
+synthetic strings at the maximum approved source lengths. Version 6 adds
+one-based round/slot evidence, opaque output-equivalence classes, and
+per-round aggregates. These are structural worst-case measurements, not
+customer profile lengths.
 
 Smoke report schema version 2 adds its fixed-fixture hash,
 planned/attempted/not-attempted
@@ -303,19 +309,12 @@ proves metered API processing, not the account's eventual monetary charge;
 reviewed. Distinct output fingerprints exist only in memory long enough to
 produce aggregate counts; no prose or individual fingerprint is written.
 
-## Recorded OpenAI calibration
+## Recorded OpenAI evidence
 
-The exact reviewed sanitized reports are:
-
-- the [pre-fix smoke](evidence/live-ai/openai-0d53d270729118e11023f2fdbf053accc82f717a-smoke-failed.json);
-- the first [post-fix smoke](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-smoke-passed.json)
-  and [12-case calibration](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-eval-12-passed.json)
-  under the deliberately high diagnostic cap;
-- the final-limit [smoke](evidence/live-ai/openai-369e70c0de131bdd93f54a485d4fb0564439202c-smoke-256-passed.json)
-  and [12-case calibration](evidence/live-ai/openai-369e70c0de131bdd93f54a485d4fb0564439202c-eval-12-256-passed.json)
-  at 256 output tokens; and
-- the schema-version-5 [metric-complete 12-case calibration](evidence/live-ai/openai-82ecbcef51b0eaeee0319704391df7aec6d7a46b-eval-12-256-v5-passed.json)
-  at the same final limits.
+The historical diagnostic and limit-calibration runs are summarized below.
+Their machine-oriented JSON checkpoints are intentionally not tracked. The
+approved 12-case-by-25-repetition result will be published here only as one
+reviewed, human-readable, content-safe Markdown report after execution.
 
 The first three-call smoke at revision
 `0d53d270729118e11023f2fdbf053accc82f717a` received three HTTP 200
@@ -369,9 +368,9 @@ of USD 1.00 per million input tokens and USD 6.00 per million output tokens,
 estimated usage was USD 0.024744; `actual_billed_usd` remains unavailable
 without a provider billing export. These runs establish live compatibility and
 provide limit-calibration evidence. The 42 post-fix calls were all valid, and
-the 27 calls at the final 256/512/732 limits were all valid. Each 12-case run's
-zero-failure one-sided 95% Wilson upper bound is approximately 18.4%, so none is
-a production reliability claim.
+the 27 calls at the final 256/512/732 limits were all valid. Each historical
+12-case run's zero-failure one-sided 95% Wilson upper bound is approximately
+18.4%, so none alone is a reliability result.
 
 The Wilson bound is conditional on this fixed, equally weighted synthetic
 corpus and the provider conditions during the recorded run. It is not a claim
