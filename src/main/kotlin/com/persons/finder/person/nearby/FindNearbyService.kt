@@ -17,6 +17,7 @@ data class NearbyPerson(
     val bio: String,
     val createdAt: Instant,
     val lastKnownLocationAt: Instant,
+    val location: GeoPoint,
     val distanceKm: Double,
 )
 

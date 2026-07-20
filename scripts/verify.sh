@@ -84,7 +84,12 @@ require_command java
 require_command docker
 require_command curl
 require_command jq
+require_command node
 require_command openssl
+
+NODE_MAJOR_VERSION="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"
+[[ "$NODE_MAJOR_VERSION" =~ ^[0-9]+$ && "$NODE_MAJOR_VERSION" -ge 18 ]] ||
+    fail "Node.js 18 or newer is required; found $(node --version)"
 
 JAVA_SPECIFICATION_VERSION="$(
     java -XshowSettings:properties -version 2>&1 |

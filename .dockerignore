@@ -4,6 +4,7 @@
 .idea/
 .secrets/
 build/
+benchmarks/results/
 *.log
 .DS_Store
 .env

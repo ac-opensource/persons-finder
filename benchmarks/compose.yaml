@@ -1,0 +1,145 @@
+name: persons-finder-benchmark
+
+services:
+  database:
+    profiles: [benchmark]
+    build:
+      context: ..
+      dockerfile: Dockerfile.postgis
+    image: persons-finder-benchmark-postgis:17
+    labels:
+      com.persons-finder.benchmark: "true"
+      com.persons-finder.benchmark.marker: persons-finder-benchmark-v1
+    environment:
+      POSTGRES_DB: persons_finder_benchmark
+      POSTGRES_PASSWORD_FILE: /run/secrets/database_password
+      POSTGRES_USER: persons_finder_benchmark
+    secrets:
+      - source: benchmark_database_password
+        target: database_password
+    volumes:
+      - benchmark_postgres_data:/var/lib/postgresql/data
+      - ./initdb:/docker-entrypoint-initdb.d:ro
+      - ./sql:/benchmarks/sql:ro
+      - ./results:/benchmarks/results
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready --dbname=persons_finder_benchmark --username=persons_finder_benchmark
+      interval: 2s
+      timeout: 3s
+      retries: 60
+      start_period: 10s
+    networks:
+      - benchmark_backend
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 60s
+
+  app:
+    profiles: [benchmark]
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    image: persons-finder-benchmark-app:local
+    labels:
+      com.persons-finder.benchmark: "true"
+      com.persons-finder.benchmark.marker: persons-finder-benchmark-v1
+    depends_on:
+      database:
+        condition: service_healthy
+    environment:
+      PERSONS_BIO_GENERATOR: deterministic
+      PERSONS_RUNTIME_MODE: assessment-local
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://database:5432/persons_finder_benchmark
+      SPRING_DATASOURCE_USERNAME: persons_finder_benchmark
+    secrets:
+      - source: benchmark_database_password
+        target: spring.datasource.password
+    ports:
+      - "127.0.0.1:18081:8080"
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - http://127.0.0.1:8080/actuator/health/readiness
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+    networks:
+      - benchmark_edge
+      - benchmark_backend
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+  app-sample:
+    profiles: [benchmark]
+    image: persons-finder-benchmark-app:local
+    pull_policy: never
+    labels:
+      com.persons-finder.benchmark: "true"
+      com.persons-finder.benchmark.marker: persons-finder-benchmark-v1
+    depends_on:
+      database:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    environment:
+      PERSONS_BIO_GENERATOR: deterministic
+      PERSONS_RUNTIME_MODE: assessment-local
+      SPRING_CONFIG_IMPORT: configtree:/run/secrets/
+      SPRING_DATASOURCE_URL: jdbc:postgresql://database:5432/persons_finder_benchmark_appsample
+      SPRING_DATASOURCE_USERNAME: persons_finder_benchmark
+    secrets:
+      - source: benchmark_database_password
+        target: spring.datasource.password
+    ports:
+      - "127.0.0.1:18082:8080"
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - --fail
+        - --silent
+        - --show-error
+        - http://127.0.0.1:8080/actuator/health/readiness
+      interval: 3s
+      timeout: 3s
+      retries: 60
+      start_period: 15s
+    networks:
+      - benchmark_edge
+      - benchmark_backend
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+    stop_grace_period: 30s
+
+secrets:
+  benchmark_database_password:
+    file: ../.secrets/benchmark-database-password
+
+volumes:
+  benchmark_postgres_data:
+    name: persons-finder-benchmark-postgres-data-v1
+    labels:
+      com.persons-finder.benchmark: "true"
+      com.persons-finder.benchmark.marker: persons-finder-benchmark-v1
+
+networks:
+  benchmark_edge:
+  benchmark_backend:
+    internal: true

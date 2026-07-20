@@ -122,6 +122,46 @@ high or critical findings under the workflow's stated filters. That workflow is
 CI configuration, not evidence that a scan passed for an unpushed local
 revision.
 
+## Local dashboard privacy and map egress
+
+`GET /persons/nearby` returns each matching person's exact canonical last-known
+point as nested `location.latitude` and `location.longitude`. This is distinct
+from the bio-generation egress boundary: no coordinates are sent to a model.
+`POST /persons` and `PUT /persons/{id}/location` responses remain unchanged and
+omit coordinates.
+
+The dashboard plots locations returned by nearby search. It retains only a
+tab-local set of draggable person IDs in `sessionStorage`; profile details and
+coordinates stay in memory and are rehydrated from nearby results after a
+reload. Markers learned only from a nearby response are visible but not
+draggable. Closing the tab or choosing **Forget tab map data** clears that
+browser mapping; it does not erase backend people or location observations, and
+it is not a privacy barrier because a later nearby search can return the
+last-known locations again. Profile details and precise locations remain
+sensitive. Nearby search sends centre coordinates in the same-origin API query
+URL and returns matching coordinates in its response; neither should be copied
+into logs, analytics, third-party URLs, or map-tile requests.
+
+The dashboard is tile-free by default. A user can deliberately opt in to the
+external best-effort OpenStreetMap service with `?tiles=osm`. Those requests
+disclose the tile zoom/column/row (`z/x/y`) and the browser referrer, which
+together can reveal the approximate viewed area. They do not include person
+profiles, bios, identifiers, API payloads, or the dashboard's tab-retained
+coordinate mapping. A sensitive deployment must keep external tiles disabled
+or use a privacy-approved or self-hosted provider and comply with that
+provider's usage policy rather than treating the public tile service as an
+availability dependency.
+
+The evaluator-default backend is unauthenticated and exposed only on loopback.
+It has no application-level authentication, per-person authorization, or rate
+limiting. Any caller who can reach it can retrieve exact last-known locations
+for people matching a query, and systematic queries can sweep a wider area.
+Do not expose this dashboard or API beyond the trusted local environment. A
+broader deployment requires authenticated callers, per-person or relationship-
+based authorization, purpose-scoped disclosure, TLS, abuse controls,
+privacy-reviewed audit metadata, and an approved location-disclosure policy;
+it may also require a separately versioned response contract.
+
 ## Third-party PII and model risk
 
 Sending names, precise locations, employment details, hobbies, identifiers, or
@@ -187,6 +227,13 @@ place it behind a dedicated egress service that:
 - enforces approved retention, residency, subprocessor, and deletion terms; and
 - undergoes threat modelling, privacy impact assessment, red-team testing,
   output monitoring, and incident-response exercises.
+
+Expose location through a separate authenticated resource boundary. Authorize
+each caller against the subject and purpose before returning even a last-known
+point, minimize precision and retention where the use case permits, prevent
+area-sweeping queries, and audit access without recording the coordinates
+themselves. The loopback assessment's unauthenticated exact-location response
+must not be deployed unchanged in that environment.
 
 Customer consent, purpose limitation, authorization, retention/deletion policy,
 and legal approval remain human-owned controls. A model response must never

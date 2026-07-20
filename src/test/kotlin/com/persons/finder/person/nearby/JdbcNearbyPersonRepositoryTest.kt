@@ -101,7 +101,7 @@ class JdbcNearbyPersonRepositoryTest {
     }
 
     @Test
-    fun `HTTP nearby route returns the projection result without coordinates`() {
+    fun `HTTP nearby route returns the projection result with nested location`() {
         val personId = create("Aroha", GeoPoint.from(-41.2865, 174.7762))
 
         mockMvc.perform(
@@ -112,10 +112,13 @@ class JdbcNearbyPersonRepositoryTest {
         )
             .andExpect(status().isOk)
             .andExpect(jsonPath("$.length()").value(1))
-            .andExpect(jsonPath("$[0].length()").value(8))
+            .andExpect(jsonPath("$[0].length()").value(9))
             .andExpect(jsonPath("$[0].id").value(personId.value.toString()))
             .andExpect(jsonPath("$[0].distanceKm").value(0.0))
             .andExpect(jsonPath("$[0].bio").isNotEmpty)
+            .andExpect(jsonPath("$[0].location.length()").value(2))
+            .andExpect(jsonPath("$[0].location.latitude").value(-41.2865))
+            .andExpect(jsonPath("$[0].location.longitude").value(174.7762))
             .andExpect(jsonPath("$[0].latitude").doesNotExist())
             .andExpect(jsonPath("$[0].longitude").doesNotExist())
     }

@@ -22,10 +22,18 @@ data class NearbyPersonResponse(
     val createdAt: String,
     @field:Schema(type = "string", format = "date-time")
     val lastKnownLocationAt: String,
+    val location: NearbyPersonLocationResponse,
     @field:Schema(
         description = "Spheroidal distance in kilometres, rounded to one decimal for display",
         minimum = "0.0",
         maximum = "100.0",
     )
     val distanceKm: BigDecimal,
+)
+
+data class NearbyPersonLocationResponse(
+    @field:Schema(minimum = "-90", maximum = "90")
+    val latitude: Double,
+    @field:Schema(minimum = "-180", maximum = "180")
+    val longitude: Double,
 )

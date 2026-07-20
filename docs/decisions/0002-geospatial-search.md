@@ -2,16 +2,17 @@
 
 - Status: accepted
 - Date: 2026-07-20
-- Delivery state: implemented; executable verification recorded separately
+- Last amended: 2026-07-21
+- Delivery state: implemented; focused response-shape and real-PostGIS checks passed
 
 ## Context
 
 `GET /persons/nearby` must return every last-known person within an inclusive
 radius of at most 100 kilometres, order matches by unrounded distance and then
-public UUID, expose only one-decimal display distance, and never expose stored
-coordinates. The one-million-row benchmark is a bonus evidence task, not
-permission to invent a different product metric or import another system's
-benchmark.
+public UUID, expose one-decimal display distance, and include the canonical
+last-known point as nested `location.latitude` and `location.longitude`. The
+one-million-row benchmark is a bonus evidence task, not permission to invent a
+different product metric or import another system's benchmark.
 
 The existing transaction model remains unchanged: immutable accepted
 `location_observation` history transactionally maintains one rebuildable
@@ -28,6 +29,10 @@ Membership and ordering use the same WGS84 spheroidal geography semantics:
   boundary-inclusive membership.
 - `ST_Distance(last_known.location, query_point, true)` supplies the unrounded
   ranking value.
+- `ST_Y(last_known.location::geometry)` and
+  `ST_X(last_known.location::geometry)` expose latitude and longitude from that
+  same canonical projection point; there is no independent response-coordinate
+  source.
 - Public ordering is that distance followed by PostgreSQL native UUID order.
 - One-decimal `distanceKm` rounding happens only after membership and ordering.
 
@@ -67,6 +72,9 @@ remain deferred unless the human-owned metric changes.
 
 - Nearby reads scale with the indexed projection and actual result cardinality,
   while projection writes pay the GiST maintenance cost.
+- Every returned match discloses its exact last-known point. This is acceptable
+  for the unauthenticated loopback-only assessment default, not a general
+  Internet-facing deployment contract.
 - An unselective query may legitimately use a sequential scan; plan shape must
   be interpreted with dataset distribution and result count.
 - With no silent cap, serialization and transfer of a very large legitimate

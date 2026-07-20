@@ -5,6 +5,16 @@
 - Scope: one functional smoke run against the default assessment-local Compose stack
 - Result: passed
 
+## Contract provenance
+
+This artifact preserves what was observed on its capture date. Its response-
+shape assertions predate the 2026-07-21 contract correction that added nested
+canonical last-known `location` to every nearby item. The membership, ordering,
+loopback, migration, logging, and teardown observations remain historical
+evidence; the eight-field count and coordinate-omission observations below do
+not verify the corrected response shape. That shape requires fresh executable
+evidence against the amended implementation.
+
 ## Procedure
 
 The application image was built from the current source inside Docker. A fresh
