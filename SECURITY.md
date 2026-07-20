@@ -134,12 +134,12 @@ The following controls are not implemented:
 
 - production reliability evidence for the remote model. A paid OpenAI
   compatibility smoke initially exposed repeated placeholders; after the
-  provider-side constraint was added, a three-call smoke and a separate
-  12-case calibration run produced 15 valid results with no retry or top-up.
-  Those small fixed runs establish compatibility and support the calibrated
-  limits, but they do not satisfy the separately designed 456-call reliability
-  protocol or predict future provider behavior. A final live rerun at the
-  calibrated 256/512/732 limits remains pending for this revision;
+  provider-side constraint was added, two three-call smokes and two separate
+  12-case calibration runs produced 30 valid results with no retry or top-up.
+  The final 15 used the calibrated 256/512/732 limits. Those small fixed runs
+  establish compatibility and support the limits, but they do not satisfy the
+  separately designed 456-call reliability protocol or predict future provider
+  behavior;
 - authentication, authorization, tenant isolation, or ownership checks;
 - application-level rate limiting, quotas, or abuse prevention;
 - TLS termination for the local HTTP API;

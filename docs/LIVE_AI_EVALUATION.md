@@ -289,10 +289,15 @@ produce aggregate counts; no prose or individual fingerprint is written.
 
 ## Recorded OpenAI calibration
 
-The exact reviewed sanitized reports are the
-[pre-fix smoke](evidence/live-ai/openai-0d53d270729118e11023f2fdbf053accc82f717a-smoke-failed.json),
-[post-fix smoke](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-smoke-passed.json),
-and [12-case calibration](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-eval-12-passed.json).
+The exact reviewed sanitized reports are:
+
+- the [pre-fix smoke](evidence/live-ai/openai-0d53d270729118e11023f2fdbf053accc82f717a-smoke-failed.json);
+- the first [post-fix smoke](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-smoke-passed.json)
+  and [12-case calibration](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-eval-12-passed.json)
+  under the deliberately high diagnostic cap; and
+- the final-limit [smoke](evidence/live-ai/openai-369e70c0de131bdd93f54a485d4fb0564439202c-smoke-256-passed.json)
+  and [12-case calibration](evidence/live-ai/openai-369e70c0de131bdd93f54a485d4fb0564439202c-eval-12-256-passed.json)
+  at 256 output tokens.
 
 The first three-call smoke at revision
 `0d53d270729118e11023f2fdbf053accc82f717a` received three HTTP 200
@@ -313,14 +318,26 @@ two. All request-boundary, canonical-schema, OpenAI placeholder-pattern,
 response-envelope, and evidence-completeness checks passed with no retry,
 top-up, pacing wait, or harness failure.
 
-Across the failed and successful calibration runs, 4,524 input and 921 output
-tokens were reported. At the published model rates used for the run, the
-estimated usage was USD 0.01005; `actual_billed_usd` remains unavailable without
-a provider billing export. These runs establish live compatibility and provide
-limit-calibration evidence. The 12-case run's zero-failure one-sided 95% Wilson
-upper bound is approximately 18.4%, so it is not a production reliability
-claim. A live rerun at the final 256/512/732 limits remains pending for the
-current revision.
+At clean revision `369e70c0de131bdd93f54a485d4fb0564439202c`, the
+final-limit smoke returned 3/3 valid distinct bios and the one-repetition
+12-case calibration returned 12/12 valid distinct bios with no catalog match.
+All 15 requests used `max_output_tokens=256`, strict JSON Schema, the expected
+placeholder pattern, `store=false`, reasoning effort `none`, and no sampling or
+stop configuration. All 15 responses were HTTP 200 `completed`; there was no
+refusal, safety result, malformed envelope, transport failure, boundary
+violation, harness error, retry, top-up, or pacing wait. The final runs reported
+3,756 input and 733 output tokens, zero cached/reasoning/tool tokens, a maximum
+of 56 output tokens, 167 authored code points, 202 final grounded code points,
+and two sentences. Aggregate latency was 1.480 seconds at p50 and 5.591 seconds
+at p95/max.
+
+Across all five reports, 33 provider calls reported 8,280 input and 1,654 output
+tokens. At the [published model rates used for the runs](https://developers.openai.com/api/docs/pricing),
+estimated usage was USD 0.018204; `actual_billed_usd` remains unavailable
+without a provider billing export. These runs establish live compatibility and
+provide limit-calibration evidence. Each 12-case run's zero-failure one-sided
+95% Wilson upper bound is approximately 18.4%, so neither is a production
+reliability claim.
 
 The Wilson bound is conditional on this fixed, equally weighted synthetic
 corpus and the provider conditions during the recorded run. It is not a claim

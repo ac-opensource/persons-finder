@@ -111,6 +111,8 @@ The script:
 Evidence is written under `build/reports/` and `build/verification/`. The
 script explicitly disables live-provider configuration and records
 `live_provider_calls=disabled` in `build/verification/summary.txt`.
+The separately gated paid nondeterministic tests and exact sanitized reports
+are documented in [`docs/LIVE_AI_EVALUATION.md`](docs/LIVE_AI_EVALUATION.md).
 
 ### Run the core stack manually
 

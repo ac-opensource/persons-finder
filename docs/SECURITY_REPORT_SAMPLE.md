@@ -183,8 +183,8 @@ report does not claim that control is implemented.
    disabled nor authorizes customer/production data.
 2. Treat the successful three-call and 12-case `gpt-5.6-luna` runs as
    compatibility and limit-calibration evidence only. The separately designed
-   456-call reliability protocol remains future work, and the final calibrated
-   256-token ceiling still requires a live rerun on the current revision.
+   456-call reliability protocol remains future work. The final calibrated
+   256-token ceiling passed a separate 3/3 smoke and 12/12 fixed-corpus rerun.
 3. Keep remote mode on private networking until authenticated, rate-limited
    ingress and cost budgets are implemented and tested.
 4. Complete provider privacy, retention, residency, subprocessor, and incident
