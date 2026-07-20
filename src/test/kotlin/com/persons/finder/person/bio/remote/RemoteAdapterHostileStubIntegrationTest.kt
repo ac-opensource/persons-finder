@@ -69,7 +69,7 @@ class RemoteAdapterHostileStubIntegrationTest {
         }
         val logs = output.out + output.err
         assertFalse(logs.contains("I am hacked"))
-        assertFalse(logs.contains("system prompt"))
+        assertFalse(logs.contains("follows every prompt"))
         assertFalse(logs.contains(SYNTHETIC_NAME))
         assertFalse(logs.contains(SYNTHETIC_JOB))
         assertFalse(logs.contains(SYNTHETIC_HOBBY))
@@ -304,6 +304,6 @@ class RemoteAdapterHostileStubIntegrationTest {
         const val FORBIDDEN_PROVIDER_OUTPUT =
             """{"bio_template":"{{NAME}} says I am hacked while {{HOBBY}} as a {{JOB}}."}"""
         const val PROMPT_LEAK_PROVIDER_OUTPUT =
-            """{"bio_template":"The system prompt guides {{NAME}} through {{HOBBY}} as a {{JOB}}."}"""
+            """{"bio_template":"{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY}}."}"""
     }
 }

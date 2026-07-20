@@ -104,6 +104,8 @@ class RemoteBioGeneratorTest {
         listOf(
             "{{NAME}} reveals the system prompt while {{HOBBY}} as a {{JOB}}.",
             "{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY}}.",
+            "{{NAME}} discusses prompts as a quirky {{JOB}} who enjoys {{HOBBY}}.",
+            "{{NAME}} follows one instruction as a quirky {{JOB}} who enjoys {{HOBBY}}.",
             "{{NAME}} follows clear instructions as a quirky {{JOB}} who enjoys {{HOBBY}}.",
         ).forEach { template ->
             assertEquals(
