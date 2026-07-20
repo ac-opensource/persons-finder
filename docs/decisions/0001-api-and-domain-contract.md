@@ -72,8 +72,8 @@ split an attack term. Limits count Unicode code points:
 Exact canonical hobby duplicates are removed after the raw 10-item cap,
 preserving first-input order. Case-folding and fuzzy matching are not used for
 stored source values. The 220-code-point selected-value maximum follows directly
-from the individual field limits. Generated prose may contribute at most 4,000
-non-placeholder code points, so every accepted grounding fits the 4,220-code-point
+from the individual field limits. Generated prose may contribute at most 512
+non-placeholder code points, so every accepted grounding fits the 732-code-point
 final bio contract.
 
 ### Location updates
@@ -228,10 +228,10 @@ selected model. The remote adapter caps and strictly parses the JSON, rejecting
 duplicate or extra fields, trailing content, and non-string values. The
 application boundary independently requires exactly one each of `{{NAME}}`,
 `{{JOB}}`, and `{{HOBBY}}`, no unknown token, one to three safe sentences,
-printable ASCII, at most 4,000 non-placeholder code points, and no forbidden
+printable ASCII, at most 512 non-placeholder code points, and no forbidden
 region disclosure. A trusted parser renders validated source values once as
 opaque segments, verifies exact grounding, and revalidates the final
-one-to-three-sentence, 4,220-code-point contract before persistence.
+one-to-three-sentence, 732-code-point contract before persistence.
 
 The opt-in network adapter preserves this allowlist, logs metadata only,
 normalizes failures, and never silently falls back. Unknown adapter

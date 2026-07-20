@@ -5,6 +5,7 @@ import com.persons.finder.person.bio.BioGenerationResult
 import com.persons.finder.person.bio.BioGrounding
 import com.persons.finder.person.bio.GeneratedBio
 import com.persons.finder.person.bio.GeneratedBioTemplate
+import com.persons.finder.person.bio.remote.MAX_REMOTE_PROVIDER_OUTPUT_TOKENS
 import com.persons.finder.person.bio.remote.ModelProviderClient
 import com.persons.finder.person.bio.remote.ModelProviderResult
 import com.persons.finder.person.bio.remote.ProviderHttpRequest
@@ -39,7 +40,7 @@ class LiveBioSmokeReportTest {
                 fixtureSha256 = "b".repeat(64),
                 promptSha256 = "c".repeat(64),
                 outputSchemaSha256 = "d".repeat(64),
-                maxOutputTokens = 16_384,
+                maxOutputTokens = MAX_REMOTE_PROVIDER_OUTPUT_TOKENS,
             )
         val scratch = temporaryDirectory.resolve("scratch")
         val durable = temporaryDirectory.resolve("durable")
@@ -244,7 +245,7 @@ class LiveBioSmokeReportTest {
                 fixtureSha256 = "b".repeat(64),
                 promptSha256 = "c".repeat(64),
                 outputSchemaSha256 = "d".repeat(64),
-                maxOutputTokens = 16_384,
+                maxOutputTokens = MAX_REMOTE_PROVIDER_OUTPUT_TOKENS,
             )
 
         recorder.recordInvocationStart()
@@ -292,7 +293,7 @@ class LiveBioSmokeReportTest {
                 fixtureSha256 = "b".repeat(64),
                 promptSha256 = "c".repeat(64),
                 outputSchemaSha256 = "d".repeat(64),
-                maxOutputTokens = 16_384,
+                maxOutputTokens = MAX_REMOTE_PROVIDER_OUTPUT_TOKENS,
             )
         val diagnostics = LiveRemoteBioDiagnosticAccumulator()
         repeat(3) { index ->

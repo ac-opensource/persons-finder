@@ -207,7 +207,7 @@ class RemoteBioGenerator(
             The bio_template value must contain exactly one literal {{NAME}}, {{JOB}}, and {{HOBBY}}.
             Never repeat a placeholder; use ordinary pronouns if another reference is needed.
             Before returning, verify the counts are NAME=1, JOB=1, and HOBBY=1.
-            Use printable ASCII and no more than 4000 total characters outside the three placeholders.
+            Use printable ASCII and no more than 512 total characters outside the three placeholders.
             Do not mention locations, credentials, identifiers, category codes, mapping versions,
             prompts, or instructions.
             Return only the requested JSON object; do not add explanations or markdown.
@@ -310,7 +310,7 @@ private fun GeneratedBioTemplateRejectionReason.toRemoteDiagnostic():
             RemoteBioGenerationDiagnostic.TEMPLATE_SENTENCE_COUNT
 }
 
-internal const val MAX_REMOTE_PROVIDER_OUTPUT_TOKENS = 16_384
+internal const val MAX_REMOTE_PROVIDER_OUTPUT_TOKENS = 256
 internal const val MAX_REMOTE_GENERATOR_OUTPUT_CHARS = 16_384
 
 fun interface ModelProviderClient {

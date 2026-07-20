@@ -45,23 +45,26 @@ outbound request. Unmatched or sensitive source values map to the broad
 The remote clients request a JSON object containing only `bio_template`. The
 application rejects an oversized response, malformed JSON, duplicate keys,
 trailing content, extra fields, non-string values, and prose outside the
-deterministic template contract. The approved temporary calibration change,
-which is still under isolated audit and is not yet verified in this checkout,
-allows up to 16,384 provider output tokens while retaining an application-owned
-4,000-non-placeholder-code-point limit. Accepted prose must:
+deterministic template contract. OpenAI additionally receives a strict string
+pattern that permits each of the six possible orders of the three required
+placeholders while requiring each placeholder exactly once. This provider-side
+constraint reduces invalid generations; the provider-neutral application
+validator remains authoritative. The calibrated request allows up to 256
+provider output tokens. Accepted prose must:
 
 - contain one to three sentences;
 - contain exactly one `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`;
 - contain no unknown placeholder or forbidden region;
 - contain printable ASCII only; and
-- stay within 4,000 non-placeholder Unicode code points.
+- stay within 512 non-placeholder Unicode code points.
 
 A trusted one-pass composer then inserts the validated local name, job title,
 and selected original hobby as opaque values. It checks exact grounding and a
-final 4,220-code-point limit. These are generous temporary calibration limits,
-not a relaxation of the sentence, placeholder, character, policy, or grounding
-checks. Model output remains untrusted data, not an instruction or authorization
-source.
+final 732-code-point limit: the 512-point prose allowance plus the existing
+220-point maximum for the selected local values. These limits retain substantial
+headroom over the paid calibration maxima without relaxing the sentence,
+placeholder, character, policy, or grounding checks. Model output remains
+untrusted data, not an instruction or authorization source.
 
 Bio policy, generation, parsing, validation, and composition all complete
 before the person/location database transaction begins. A failure leaves no
@@ -78,7 +81,7 @@ propagates, and there is no automatic provider or deterministic fallback.
   provider authentication headers rather than request JSON. Invalid provider,
   model, credential, timeout, or runtime combinations fail startup.
 - Provider clients use fixed HTTPS endpoints, do not follow redirects, enforce
-  bounded timeouts, and stop before buffering more than 65,536 response bytes.
+  bounded timeouts, and stop before buffering more than 262,144 response bytes.
   Request/response diagnostic representations omit headers and bodies.
 - The application container runs as a dedicated non-root user with a read-only
   root filesystem, a bounded `/tmp` tmpfs, and `no-new-privileges`. The database
@@ -129,16 +132,14 @@ review before any production use.
 
 The following controls are not implemented:
 
-- verified live compatibility or reliability for the current remote prose
-  schema: at clean revision `a5b27d35cde57e935ea3be36b7bb3bd06a6d4d8e`,
-  the first paid OpenAI smoke call returned normalized `INVALID_OUTPUT`; the
-  protocol made no retry, skipped the two remaining smoke calls, and did not
-  start the 456-call aggregate. The earlier closed-ID smoke is superseded;
-- verification of the approved temporary 16,384-token, 4,000-authored, and
-  4,220-final calibration limits. Only a three-call `gpt-5.6-luna` calibration
-  smoke is currently authorized, and it has not run. No aggregate is currently
-  authorized; a post-smoke calibrated output ceiling and separate spend
-  approval are required first;
+- production reliability evidence for the remote model. A paid OpenAI
+  compatibility smoke initially exposed repeated placeholders; after the
+  provider-side constraint was added, a three-call smoke and a separate
+  12-case calibration run produced 15 valid results with no retry or top-up.
+  Those small fixed runs establish compatibility and support the calibrated
+  limits, but they do not satisfy the separately designed 456-call reliability
+  protocol or predict future provider behavior. A final live rerun at the
+  calibrated 256/512/732 limits remains pending for this revision;
 - authentication, authorization, tenant isolation, or ownership checks;
 - application-level rate limiting, quotas, or abuse prevention;
 - TLS termination for the local HTTP API;

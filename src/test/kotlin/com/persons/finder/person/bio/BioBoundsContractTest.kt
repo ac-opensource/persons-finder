@@ -33,7 +33,7 @@ class BioBoundsContractTest {
     }
 
     @Test
-    fun `provider envelope cap leaves bounded headroom above the temporary token ceiling`() {
+    fun `provider envelope cap leaves bounded headroom above the configured token ceiling`() {
         assertTrue(
             MAX_PROVIDER_RESPONSE_BYTES >= MAX_REMOTE_PROVIDER_OUTPUT_TOKENS * 16,
         )

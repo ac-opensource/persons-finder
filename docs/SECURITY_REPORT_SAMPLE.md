@@ -46,11 +46,12 @@ Included:
 - provider response-size, timeout, redirect, and diagnostic boundaries;
 - local bio rendering and final-output invariants;
 - error sanitization and persistence atomicity; and
-- the real HTTP/PostGIS rejection path for the challenge attack.
+- the real HTTP/PostGIS rejection path for the challenge attack; and
+- sanitized paid OpenAI compatibility and calibration evidence.
 
 Excluded:
 
-- a live-provider rerun of the current model-authored-prose contract;
+- the separately designed 456-call live-provider reliability protocol;
 - internet-facing authentication, authorization, and per-caller quotas;
 - third-party provider contractual, retention, residency, and subprocessor
   review;
@@ -82,7 +83,7 @@ Unmatched or sensitive values degrade to `other`.
 
 The remote result is one model-authored `bio_template` string. The application
 validates exactly one each of `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, one to
-three safe sentences, printable ASCII, and the 4,000-code-point literal budget,
+three safe sentences, printable ASCII, and the 512-code-point literal budget,
 then parses literal/token segments and inserts validated source strings once as
 opaque local data. They cannot enter the provider request and are never
 rescanned after insertion.
@@ -169,24 +170,21 @@ report does not claim that control is implemented.
 | Oversized provider response | Subscription cancelled and failure normalized | HTTP transport and provider-client tests |
 | Missing, duplicate, mutated, escaped, wrapped, or unknown placeholder | `BIO_GENERATION_INVALID`; no writes | Application template and transaction tests |
 | Placeholder-looking or regex-significant source | Inserted once as opaque data and revalidated | Trusted-composer tests |
-| Any validated prose/job/interest combination | One to three safe grounded sentences of at most 4,220 Unicode code points | Prose-property, mapping, composer, and bounds tests |
+| Any validated prose/job/interest combination | One to three safe grounded sentences of at most 732 Unicode code points | Prose-property, mapping, composer, and bounds tests |
 | Bio policy, provider, parsing, or rendering failure | No person, observation, or projection write | Application and real PostGIS tests |
 
 ## Residual risks and next actions
 
-1. Run all gated live-provider evaluations for the current prose schema
-   only after the opt-in, approved credentials/models, provider-specific
-   synthetic retention/data-use approval, disabled automatic content telemetry,
-   and application-owned request inspection prerequisites are confirmed. The
-   approval accepts provider data use only for the fixed synthetic smoke
-   fixtures and versioned aggregate corpus; it neither claims logging is
+1. Retain the live-provider gates for explicit opt-in, approved
+   credentials/models, provider-specific synthetic retention/data-use approval,
+   disabled automatic content telemetry, and application-owned request
+   inspection. The approval accepts provider data use only for the fixed
+   synthetic fixtures and versioned corpus; it neither claims logging is
    disabled nor authorizes customer/production data.
-2. Run the approved three-call `gpt-5.6-luna` calibration first with a zero
-   interval, no retries, and the cumulative USD 50 investigation ceiling.
-   Review the sanitized usage and structural maxima before choosing the final
-   output allowance. The separately designed 456-call reliability aggregate
-   (12 cases x 38 repetitions, one-sided 95% Wilson upper failure bound at or
-   below 1%) is not authorized by the calibration approval.
+2. Treat the successful three-call and 12-case `gpt-5.6-luna` runs as
+   compatibility and limit-calibration evidence only. The separately designed
+   456-call reliability protocol remains future work, and the final calibrated
+   256-token ceiling still requires a live rerun on the current revision.
 3. Keep remote mode on private networking until authenticated, rate-limited
    ingress and cost budgets are implemented and tested.
 4. Complete provider privacy, retention, residency, subprocessor, and incident

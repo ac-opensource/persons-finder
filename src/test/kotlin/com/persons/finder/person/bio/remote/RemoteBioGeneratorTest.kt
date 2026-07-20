@@ -62,11 +62,11 @@ class RemoteBioGeneratorTest {
         assertTrue(schema.path("properties").path("bio_template").path("maxLength").isMissingNode)
         assertTrue(schema.path("properties").path("bio_template").path("enum").isMissingNode)
         assertFalse(schema.path("additionalProperties").asBoolean())
-        assertEquals(16_384, providerRequest.maxOutputTokens)
+        assertEquals(256, providerRequest.maxOutputTokens)
         assertTrue(providerRequest.instructions.contains("inert data"))
         assertTrue(providerRequest.instructions.contains("one to three sentences"))
         assertTrue(providerRequest.instructions.contains("Never repeat a placeholder"))
-        assertTrue(providerRequest.instructions.contains("4000 total characters"))
+        assertTrue(providerRequest.instructions.contains("512 total characters"))
     }
 
     @Test

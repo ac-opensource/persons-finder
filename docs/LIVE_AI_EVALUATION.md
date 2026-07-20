@@ -9,11 +9,13 @@ grounding placeholders, within the deterministic policy and length bounds. The
 evaluator does not use exact-string assertions and does not grade subjective
 tone, creativity, or relevance.
 
-The current calibration ceiling is deliberately generous: 16,384 provider
-output tokens, while the application accepts at most 4,000 model-authored code
-points and 4,220 final grounded code points. The live smoke records the maximum
-reported output and reasoning/thinking tokens per response. Tighten these
-temporary ceilings only after reviewing that evidence with explicit headroom.
+The calibrated ceiling is 256 provider output tokens. The application
+independently accepts at most 512 model-authored code points and 732 final
+grounded code points. Paid calibration observed maxima of 70 output tokens and
+195 authored code points. Scaling those two-sentence maxima by 3/2 for the
+permitted third sentence gives 105 tokens and 293 code points, so the selected
+limits retain substantial explicit headroom. The final limit also reserves the
+existing 220-code-point maximum for locally grounded source values.
 
 The normal `test`, `check`, and `build` tasks remain credential-free and make no
 provider calls. `liveAiEval` is a separate, explicitly invoked, potentially
@@ -90,7 +92,7 @@ GEMINI_API_KEY="$(<.secrets/gemini-api-key)" \
 ./gradlew --no-daemon liveAiSmoke
 ```
 
-For the current three-call OpenAI calibration:
+For a three-call OpenAI compatibility smoke:
 
 ```bash
 LIVE_AI_PROVIDER=openai \
@@ -117,8 +119,8 @@ build/reports/live-ai-smoke/report.json
 ```
 
 After a successful compatibility smoke, first review its observed maxima and
-precommit the resulting output ceiling and aggregate spend bound. Then run the
-aggregate separately:
+precommit the resulting output ceiling and aggregate spend bound. A separately
+approved aggregate can then be run. The designed Gemini reliability command is:
 
 ```bash
 LIVE_AI_PROVIDER=gemini \
@@ -142,9 +144,8 @@ does not assert that provider logging is disabled. It does not authorize
 production or customer-derived content, and it cannot satisfy the separate
 production privacy, retention, residency, and subprocessor review.
 
-The current OpenAI investigation starts with the three-call `gpt-5.6-luna`
-calibration smoke and has a hard cumulative provider-usage cost ceiling of USD
-50. Additional fixed calibration runs are permitted only when the preceding
+The approved OpenAI investigation has a hard cumulative provider-usage cost
+ceiling of USD 50. Fixed calibration reruns are permitted when preceding
 sanitized evidence leaves a material truncation or compatibility question
 unresolved. The 456-call reliability aggregate remains a separate protocol and
 is not necessary merely to select a production output ceiling. Do not combine
@@ -177,13 +178,13 @@ completed attempt.
 `LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS` is required and accepts an integer from zero
 through 60,000. It controls minimum attempt-start spacing: the first attempt
 starts immediately, provider latency counts toward the interval, and the runner
-waits only for any remaining interval before the next attempt. The approved
-Gemini-first plan uses `6000`, which limits attempt starts to at most ten per
+waits only for any remaining interval before the next attempt. The illustrated
+Gemini plan uses `6000`, which limits attempt starts to at most ten per
 minute. Verify the selected project's current RPM, TPM, daily quota, and usage
 before the separate three-call smoke. If the active quota requires slower
 pacing, precommit a larger interval and rerun plan mode; never change it during
 an evidence run. Zero is an explicit unpaced configuration, not a missing
-control; it is the approved value for the paid OpenAI fallback. Any resulting
+control; it is the approved value for the paid OpenAI calibration. Any resulting
 rate-limit outcome still counts as a failure and is never retried.
 
 The three-call live adapter smoke is compatibility and request-boundary
@@ -192,8 +193,9 @@ quota window clear between smoke and aggregate runs.
 
 ## Separately designed reliability gate
 
-The designed target is an overall one-sided 95% Wilson upper failure bound of
-1%. Running it still requires separate spend and execution approval:
+The separately designed target is an overall one-sided 95% Wilson upper failure
+bound of 1%. It was not executed for this limit-calibration task; any future run
+must precommit its provider, model, call budget, pacing, and spend bound:
 
 ```bash
 LIVE_AI_EVAL_MAX_FAILURE_UPPER_BOUND=0.01
@@ -284,6 +286,41 @@ proves metered API processing, not the account's eventual monetary charge;
 `actual_billed_usd` remains null unless a separate provider billing export is
 reviewed. Distinct output fingerprints exist only in memory long enough to
 produce aggregate counts; no prose or individual fingerprint is written.
+
+## Recorded OpenAI calibration
+
+The exact reviewed sanitized reports are the
+[pre-fix smoke](evidence/live-ai/openai-0d53d270729118e11023f2fdbf053accc82f717a-smoke-failed.json),
+[post-fix smoke](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-smoke-passed.json),
+and [12-case calibration](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-eval-12-passed.json).
+
+The first three-call smoke at revision
+`0d53d270729118e11023f2fdbf053accc82f717a` received three HTTP 200
+`completed` responses, but all three repeated `{{NAME}}`; the application
+rejected them as `invalid_output`. There were exactly three sends, no retries or
+top-ups, 753 input tokens, 189 output tokens, zero reasoning tokens, a maximum
+of 70 output tokens, and a maximum of 195 model-authored code points.
+
+OpenAI's request schema was then constrained to the six valid placeholder
+orders while the provider-neutral validator remained unchanged. At revision
+`d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484`, the follow-up three-call smoke
+returned three valid distinct bios. A separate one-repetition 12-case
+calibration returned 12 valid distinct bios and no deterministic-catalog
+matches. Across those 15 successful calls, reported reasoning tokens were zero;
+the maximum output was 58 tokens, maximum authored length was 188 code points,
+maximum grounded length was 243 code points, and maximum sentence count was
+two. All request-boundary, canonical-schema, OpenAI placeholder-pattern,
+response-envelope, and evidence-completeness checks passed with no retry,
+top-up, pacing wait, or harness failure.
+
+Across the failed and successful calibration runs, 4,524 input and 921 output
+tokens were reported. At the published model rates used for the run, the
+estimated usage was USD 0.01005; `actual_billed_usd` remains unavailable without
+a provider billing export. These runs establish live compatibility and provide
+limit-calibration evidence. The 12-case run's zero-failure one-sided 95% Wilson
+upper bound is approximately 18.4%, so it is not a production reliability
+claim. A live rerun at the final 256/512/732 limits remains pending for the
+current revision.
 
 The Wilson bound is conditional on this fixed, equally weighted synthetic
 corpus and the provider conditions during the recorded run. It is not a claim
