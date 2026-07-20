@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-19
+- Last amended: 2026-07-21
 - Delivery state: POST, PUT, and nearby implemented
 
 ## Context
@@ -140,10 +141,18 @@ invalid. Radius is kilometres with `0 < radius <= 100`.
 
 The response is a bare JSON array, including `[]` when there are no matches.
 Every match is returned without a silent cap, including distance zero and the
-exact radius boundary. Each item contains the create response fields plus
-numeric `distanceKm`, rendered to one decimal place. Membership and ordering
-use unrounded spheroidal distance, followed by public person UUID as the stable
-tie-break. Stored coordinates are never returned.
+exact radius boundary. Each item contains the create response fields, nested
+`location` with canonical `latitude` and `longitude`, and numeric `distanceKm`
+rendered to one decimal place. The location is the winning canonical
+last-known projection point used by that same query for membership and
+ordering. Membership and ordering use unrounded spheroidal distance, followed
+by public person UUID as the stable tie-break.
+
+This exact-location disclosure is part of the existing nearby route; it adds no
+route and does not change the POST or PUT response shapes. The assessment
+default remains unauthenticated and loopback-bound. A deployment beyond that
+trusted local boundary requires authentication, per-person authorization,
+abuse controls, and an approved location-disclosure policy.
 
 ### Errors
 
@@ -255,14 +264,17 @@ observation, and projection.
   performance lifecycle stay owned by the nearby slice.
 - Location updates have one both-or-neither contract with defined no-key and
   keyed retry semantics.
-- Exact wire errors and privacy rules are testable without persistence.
+- Exact wire errors and location-disclosure boundaries are testable without
+  persistence.
 - PostgreSQL/PostGIS persistence uses Flyway-owned schema and explicit JDBC.
 
 ## Out of scope
 
-The one-million-row bonus benchmark, authentication,
+The one-million-row bonus benchmark, authentication and authorization,
 mobile code, and deferred product features remain outside the mandatory
-contract slice. The nearby query port and JDBC/PostGIS adapter stay structured
+contract slice. Consequently, the mandatory exact-location response is suitable
+only for the loopback-bound assessment default, not an Internet-facing
+deployment. The nearby query port and JDBC/PostGIS adapter stay structured
 separately so that search does not grow the shared command repository.
 Retention, erasure, purge repair, post-purge replay, restore, receipt/HMAC
 design, and key rotation remain lifecycle questions requiring separate human
@@ -270,8 +282,9 @@ approval.
 
 ## Planned evidence
 
-- Focused controller checks for POST/PUT routes, bodies, headers, response
-  privacy, query strictness, and Problem Details.
+- Focused controller checks for POST/PUT routes, bodies, headers, their unchanged
+  response shapes, nearby nested canonical location, query strictness, and
+  Problem Details.
 - Focused domain checks for canonicalization, bounds, catalogs, source policy,
   template parsing/composition, timestamps, and coordinates.
 - Fresh real-PostGIS Flyway/schema checks plus transaction, rollback, keyed

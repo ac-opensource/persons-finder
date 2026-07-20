@@ -818,6 +818,36 @@ code {
     padding: 12px;
 }
 
+.nearby-pagination {
+    position: sticky;
+    z-index: 2;
+    bottom: 0;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 8px;
+    margin-top: auto;
+    padding: 10px 12px 12px;
+    border-top: 1px solid var(--border);
+    background: rgba(255, 253, 248, 0.96);
+    backdrop-filter: blur(8px);
+}
+
+.nearby-pagination[hidden] {
+    display: none;
+}
+
+.nearby-page-status {
+    color: var(--ink-soft);
+    font-size: 10px;
+    font-weight: 800;
+    white-space: nowrap;
+}
+
+.nearby-pagination .button {
+    padding-inline: 10px;
+}
+
 .nearby-rank {
     display: grid;
     width: 24px;
@@ -838,40 +868,42 @@ code {
     color: #08755d;
 }
 
-.person-detail {
-    margin: auto 12px 12px;
-    padding: 14px;
+.person-detail-dialog {
+    position: fixed;
+    z-index: 1800;
+    top: calc(var(--header-height) + 18px);
+    right: 18px;
+    bottom: auto;
+    left: auto;
+    width: min(410px, calc(100vw - 36px));
+    max-height: calc(100vh - var(--header-height) - 36px);
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
-    background: var(--surface-muted);
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: var(--shadow-dialog);
 }
 
-.person-detail[hidden],
-#detail-content[hidden],
-#detail-empty[hidden] {
+.person-detail-dialog:not([open]) {
     display: none;
 }
 
-.detail-empty {
-    display: grid;
-    justify-items: center;
-    padding: 5px;
-    color: var(--ink-soft);
-    text-align: center;
+.person-detail-window {
+    position: relative;
+    max-height: calc(100vh - var(--header-height) - 36px);
+    padding: 18px;
+    overflow-y: auto;
 }
 
-.detail-empty .empty-state-icon {
-    width: 28px;
-    height: 28px;
-    margin-bottom: 6px;
-    font-size: 13px;
-    font-style: italic;
-    font-family: Georgia, serif;
-}
-
-.detail-empty p {
-    max-width: 230px;
-    font-size: 11px;
+.person-detail-close {
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    float: right;
+    margin-left: 12px;
 }
 
 .detail-heading {
@@ -880,6 +912,11 @@ code {
     justify-content: space-between;
     gap: 10px;
     margin-bottom: 13px;
+}
+
+.person-detail__name {
+    padding-right: 4px;
+    font-size: 19px;
 }
 
 .detail-list {
@@ -910,6 +947,50 @@ code {
     margin-top: 12px;
     padding-top: 10px;
     border-top: 1px solid var(--border);
+}
+
+.person-detail__bio {
+    margin-top: 5px;
+    color: var(--ink-soft);
+    overflow-wrap: anywhere;
+}
+
+.move-person-form {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-top: 16px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+}
+
+.move-person-form__title,
+.move-person-form__help,
+.move-person-form .form-error,
+.move-person-form button {
+    grid-column: 1 / -1;
+}
+
+.move-person-form__help {
+    color: var(--ink-soft);
+    font-size: 11px;
+}
+
+.move-person-form label {
+    display: grid;
+    gap: 5px;
+    color: var(--ink-soft);
+    font-size: 11px;
+}
+
+.move-person-form input {
+    width: 100%;
+    min-height: 38px;
+    padding: 7px 9px;
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--ink);
 }
 
 .person-dialog {
@@ -1201,9 +1282,6 @@ code {
         grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
-    .person-detail {
-        margin-top: 0;
-    }
 }
 
 @media (max-width: 780px) {
@@ -1256,6 +1334,21 @@ code {
 
     .nearby-list {
         grid-template-columns: 1fr;
+    }
+
+    .person-detail-dialog {
+        top: auto;
+        right: 10px;
+        bottom: 10px;
+        left: 10px;
+        width: auto;
+        max-height: min(72vh, 620px);
+        border-radius: var(--radius-lg);
+    }
+
+    .person-detail-window {
+        max-height: min(72vh, 620px);
+        padding: 16px;
     }
 
     .map-message {
@@ -1313,6 +1406,10 @@ code {
 
     .dialog-actions .button {
         flex: 1;
+    }
+
+    .move-person-form {
+        grid-template-columns: 1fr;
     }
 
     .hobby-row {

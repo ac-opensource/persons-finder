@@ -9,6 +9,8 @@
     });
     const DEFAULT_RADIUS_KM = 10;
     const NEARBY_DEBOUNCE_MS = 275;
+    const NEARBY_LIST_PAGE_SIZE = 250;
+    const NEARBY_MARKER_BATCH_SIZE = 500;
     const MAX_SESSION_PEOPLE = 500;
     const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
     const TILE_ATTRIBUTION =
@@ -32,13 +34,23 @@
         centerMarker: null,
         geofence: null,
         personMarkers: new Map(),
+        nearbyMarkers: new Map(),
+        nearbyMarkerLayer: null,
+        nearbyRenderer: null,
+        nearbyMarkerColors: null,
+        nearbyMarkerFrame: null,
+        nearbyMarkerRenderSequence: 0,
+        renderedNearbyPeople: null,
+        renderedNearbyTrackedIds: "",
         sessionPeople: new Map(),
         nearbyPeople: [],
         nearbyStatus: "idle",
         nearbyAbortController: null,
         nearbyTimer: null,
         nearbySequence: 0,
+        nearbyListOffset: 0,
         selectedPersonId: null,
+        detailReturnFocus: null,
         pendingLocationIds: new Set(),
         pendingCreateCoordinates: null,
         toastTimer: null,
@@ -108,10 +120,15 @@
             nearbyCount: byId("nearby-count"),
             nearbyState: byId("nearby-state"),
             nearbyEmpty: byId("nearby-empty"),
+            nearbyPagination: byId("nearby-pagination"),
+            nearbyPrevious: byId("nearby-previous"),
+            nearbyNext: byId("nearby-next"),
+            nearbyPageStatus: byId("nearby-page-status"),
             sessionList: byId("session-list"),
             sessionCount: byId("session-count"),
             sessionState: byId("session-state"),
-            detailEmpty: byId("detail-empty"),
+            detailDialog: byId("person-detail-dialog"),
+            detailClose: byId("close-person-detail"),
             detailContent: byId("detail-content"),
             forgetSession: byId("forget-session"),
             toastRegion: byId("toast-region"),
@@ -742,6 +759,138 @@
         }
     }
 
+    function cssColor(variable, fallback) {
+        const value = window
+            .getComputedStyle(document.documentElement)
+            .getPropertyValue(variable)
+            .trim();
+        return value || fallback;
+    }
+
+    function applyNearbyMarkerStyle(marker, personId) {
+        if (!marker) {
+            return;
+        }
+        const colors = state.nearbyMarkerColors || {
+            violet: "#5b5ce2",
+            surface: "#fffdf8",
+            emerald: "#0e8f73",
+        };
+        const selected = state.selectedPersonId === personId;
+        marker.setRadius(selected ? 7 : 4);
+        marker.setStyle({
+            color: selected
+                ? colors.violet
+                : colors.surface,
+            weight: selected ? 3 : 1,
+            opacity: selected ? 1 : 0.9,
+            fillColor: colors.emerald,
+            fillOpacity: selected ? 1 : 0.72,
+        });
+    }
+
+    function updateNearbyMarkerSelection(previousPersonId, nextPersonId) {
+        if (previousPersonId && previousPersonId !== nextPersonId) {
+            applyNearbyMarkerStyle(
+                state.nearbyMarkers.get(previousPersonId),
+                previousPersonId,
+            );
+        }
+        if (nextPersonId) {
+            applyNearbyMarkerStyle(
+                state.nearbyMarkers.get(nextPersonId),
+                nextPersonId,
+            );
+        }
+    }
+
+    function clearNearbyMarkers() {
+        state.nearbyMarkerRenderSequence += 1;
+        if (state.nearbyMarkerFrame !== null) {
+            window.cancelAnimationFrame(state.nearbyMarkerFrame);
+            state.nearbyMarkerFrame = null;
+        }
+        state.nearbyMarkerLayer?.clearLayers();
+        state.nearbyMarkers.clear();
+        if (ui.map) {
+            ui.map.dataset.nearbyMarkerCount = "0";
+        }
+    }
+
+    function renderNearbyMarkers() {
+        if (!state.map || !state.nearbyMarkerLayer) {
+            return;
+        }
+
+        const trackedIds = Array.from(state.sessionPeople.keys())
+            .sort()
+            .join(",");
+        if (
+            state.renderedNearbyPeople === state.nearbyPeople &&
+            state.renderedNearbyTrackedIds === trackedIds
+        ) {
+            return;
+        }
+        state.renderedNearbyPeople = state.nearbyPeople;
+        state.renderedNearbyTrackedIds = trackedIds;
+        clearNearbyMarkers();
+
+        if (
+            state.nearbyStatus !== "success" ||
+            state.nearbyPeople.length === 0
+        ) {
+            return;
+        }
+
+        const people = state.nearbyPeople.filter(
+            (person) => !state.sessionPeople.has(person.id),
+        );
+        const sequence = state.nearbyMarkerRenderSequence;
+        let offset = 0;
+
+        const addBatch = () => {
+            if (
+                sequence !== state.nearbyMarkerRenderSequence ||
+                !state.nearbyMarkerLayer
+            ) {
+                return;
+            }
+
+            const limit = Math.min(
+                offset + NEARBY_MARKER_BATCH_SIZE,
+                people.length,
+            );
+            for (; offset < limit; offset += 1) {
+                const person = people[offset];
+                const marker = window.L.circleMarker(
+                    [person.latitude, person.longitude],
+                    {
+                        renderer: state.nearbyRenderer,
+                        radius: 4,
+                        bubblingMouseEvents: false,
+                        interactive: true,
+                    },
+                );
+                applyNearbyMarkerStyle(marker, person.id);
+                marker.on("click", () => selectPerson(person.id, true));
+                marker.addTo(state.nearbyMarkerLayer);
+                state.nearbyMarkers.set(person.id, marker);
+            }
+            if (ui.map) {
+                ui.map.dataset.nearbyMarkerCount = String(offset);
+            }
+
+            if (offset < people.length) {
+                state.nearbyMarkerFrame =
+                    window.requestAnimationFrame(addBatch);
+            } else {
+                state.nearbyMarkerFrame = null;
+            }
+        };
+
+        addBatch();
+    }
+
     function updateCenterVisuals() {
         setText(ui.radiusOutput, `${formatRadius(state.radiusKm)} km`);
         if (ui.radiusInput && document.activeElement !== ui.radiusInput) {
@@ -803,13 +952,26 @@
             [state.searchCenter.latitude, state.searchCenter.longitude],
             13,
         );
+        const nearbyPeoplePane = state.map.createPane("nearbyPeoplePane");
+        nearbyPeoplePane.style.zIndex = "410";
+        state.nearbyRenderer = window.L.canvas({
+            pane: "nearbyPeoplePane",
+            padding: 0.5,
+            tolerance: 5,
+        });
+        state.nearbyMarkerColors = {
+            violet: cssColor("--violet", "#5b5ce2"),
+            surface: cssColor("--surface", "#fffdf8"),
+            emerald: cssColor("--emerald", "#0e8f73"),
+        };
+        state.nearbyMarkerLayer = window.L.layerGroup().addTo(state.map);
 
         const tilesDisabled =
             new URLSearchParams(window.location.search).get("tiles") === "off";
         if (tilesDisabled) {
             if (ui.tileWarning) {
                 ui.tileWarning.textContent =
-                    "Basemap disabled for this session. API tools and tab-known markers still work.";
+                    "Basemap disabled for this session. API tools and all location markers still work.";
             }
             setHidden(ui.tileWarning, false);
         } else {
@@ -1372,18 +1534,29 @@
         }
     }
 
-    function validNearbyPerson(value) {
-        return (
+    function validNearbyLocation(value) {
+        return Boolean(
             value &&
-            typeof value === "object" &&
-            typeof value.id === "string" &&
-            UUID_PATTERN.test(value.id) &&
-            typeof value.name === "string" &&
-            typeof value.jobTitle === "string" &&
-            Array.isArray(value.hobbies) &&
-            typeof value.bio === "string" &&
-            typeof value.lastKnownLocationAt === "string" &&
-            Number.isFinite(Number(value.distanceKm))
+                typeof value === "object" &&
+                typeof value.latitude === "number" &&
+                typeof value.longitude === "number" &&
+                isFiniteCoordinate(value.latitude, value.longitude),
+        );
+    }
+
+    function validNearbyPerson(value) {
+        return Boolean(
+            value &&
+                typeof value === "object" &&
+                typeof value.id === "string" &&
+                UUID_PATTERN.test(value.id) &&
+                typeof value.name === "string" &&
+                typeof value.jobTitle === "string" &&
+                Array.isArray(value.hobbies) &&
+                typeof value.bio === "string" &&
+                typeof value.lastKnownLocationAt === "string" &&
+                validNearbyLocation(value.location) &&
+                Number.isFinite(Number(value.distanceKm)),
         );
     }
 
@@ -1401,8 +1574,35 @@
             createdAt:
                 typeof value.createdAt === "string" ? value.createdAt : "",
             lastKnownLocationAt: value.lastKnownLocationAt,
+            latitude: value.location.latitude,
+            longitude: value.location.longitude,
             distanceKm: Number(value.distanceKm),
         };
+    }
+
+    function synchronizeTrackedLocations(nearbyPeople) {
+        let changed = false;
+        nearbyPeople.forEach((nearbyPerson) => {
+            const trackedPerson = state.sessionPeople.get(nearbyPerson.id);
+            if (!trackedPerson) {
+                return;
+            }
+            if (
+                trackedPerson.latitude !== nearbyPerson.latitude ||
+                trackedPerson.longitude !== nearbyPerson.longitude ||
+                trackedPerson.lastKnownLocationAt !==
+                    nearbyPerson.lastKnownLocationAt
+            ) {
+                trackedPerson.latitude = nearbyPerson.latitude;
+                trackedPerson.longitude = nearbyPerson.longitude;
+                trackedPerson.lastKnownLocationAt =
+                    nearbyPerson.lastKnownLocationAt;
+                changed = true;
+            }
+        });
+        if (changed) {
+            persistSessionPeople();
+        }
     }
 
     function scheduleNearbySearch(immediate = false) {
@@ -1449,6 +1649,8 @@
                 return;
             }
             state.nearbyPeople = response.map(normalizeNearbyPerson);
+            state.nearbyListOffset = 0;
+            synchronizeTrackedLocations(state.nearbyPeople);
             state.nearbyStatus = "success";
             showAppStatus("API connected", "success");
             renderAll();
@@ -1572,6 +1774,7 @@
             return;
         }
         clearElement(ui.nearbyList);
+        setHidden(ui.nearbyPagination, true);
 
         if (state.nearbyStatus === "loading") {
             setHidden(ui.nearbyEmpty, true);
@@ -1601,63 +1804,101 @@
             return;
         }
         setHidden(ui.nearbyEmpty, true);
+        const lastPageOffset =
+            Math.floor(
+                (state.nearbyPeople.length - 1) / NEARBY_LIST_PAGE_SIZE,
+            ) * NEARBY_LIST_PAGE_SIZE;
+        const pageStart = Math.min(
+            state.nearbyListOffset,
+            lastPageOffset,
+        );
+        const pageEnd = Math.min(
+            pageStart + NEARBY_LIST_PAGE_SIZE,
+            state.nearbyPeople.length,
+        );
+        state.nearbyListOffset = pageStart;
         setNearbyState(
             `${state.nearbyPeople.length} ${
                 state.nearbyPeople.length === 1 ? "person" : "people"
-            } returned in API order.`,
+            } returned in API order. Showing ${pageStart + 1}–${pageEnd}.`,
             "success",
         );
 
-        state.nearbyPeople.forEach((person, index) => {
-            const tracked = state.sessionPeople.get(person.id);
-            const stale = tracked ? sessionPersonIsStale(tracked) : false;
-            const template = byId("nearby-item-template");
-            const item = template?.content?.firstElementChild
-                ? template.content.firstElementChild.cloneNode(true)
-                : document.createElement("li");
-            item.classList.add("nearby-item");
-            item.dataset.personId = person.id;
-            item.dataset.tracked = String(Boolean(tracked));
-            item.dataset.stale = String(stale);
-            item.classList.toggle(
-                "is-selected",
-                state.selectedPersonId === person.id,
-            );
+        const fragment = document.createDocumentFragment();
+        const template = byId("nearby-item-template");
+        state.nearbyPeople
+            .slice(pageStart, pageEnd)
+            .forEach((person, index) => {
+                const tracked = state.sessionPeople.get(person.id);
+                const stale = tracked
+                    ? sessionPersonIsStale(tracked)
+                    : false;
+                const item = template?.content?.firstElementChild
+                    ? template.content.firstElementChild.cloneNode(true)
+                    : document.createElement("li");
+                item.classList.add("nearby-item");
+                item.dataset.personId = person.id;
+                item.dataset.tracked = String(Boolean(tracked));
+                item.dataset.stale = String(stale);
+                item.classList.toggle(
+                    "is-selected",
+                    state.selectedPersonId === person.id,
+                );
 
-            let button = item.querySelector("[data-select-nearby]");
-            if (!button) {
-                button = document.createElement("button");
-                button.className = "nearby-card";
-                item.append(button);
+                let button = item.querySelector("[data-select-nearby]");
+                if (!button) {
+                    button = document.createElement("button");
+                    button.className = "nearby-card";
+                    item.append(button);
+                }
+                button.type = "button";
+                button.setAttribute(
+                    "aria-current",
+                    String(state.selectedPersonId === person.id),
+                );
+                setText(
+                    item.querySelector("[data-nearby-rank]"),
+                    String(pageStart + index + 1).padStart(2, "0"),
+                );
+                setText(item.querySelector("[data-nearby-name]"), person.name);
+                setText(
+                    item.querySelector("[data-nearby-job]"),
+                    person.jobTitle,
+                );
+                setText(
+                    item.querySelector("[data-nearby-distance]"),
+                    `${person.distanceKm.toFixed(1)} km`,
+                );
+                setText(
+                    item.querySelector("[data-nearby-location-note]"),
+                    `${formatCoordinate(
+                        person.latitude,
+                        5,
+                    )}, ${formatCoordinate(person.longitude, 5)} · ${
+                        tracked
+                            ? stale
+                                ? "tab marker may be stale"
+                                : "draggable in this tab"
+                            : "read-only marker"
+                    }`,
+                );
+                fragment.append(item);
+            });
+        ui.nearbyList.append(fragment);
+        if (state.nearbyPeople.length > NEARBY_LIST_PAGE_SIZE) {
+            if (ui.nearbyPrevious) {
+                ui.nearbyPrevious.disabled = pageStart === 0;
             }
-            button.type = "button";
-            button.setAttribute(
-                "aria-current",
-                String(state.selectedPersonId === person.id),
-            );
+            if (ui.nearbyNext) {
+                ui.nearbyNext.disabled =
+                    pageEnd >= state.nearbyPeople.length;
+            }
             setText(
-                item.querySelector("[data-nearby-rank]"),
-                String(index + 1).padStart(2, "0"),
+                ui.nearbyPageStatus,
+                `${pageStart + 1}–${pageEnd} of ${state.nearbyPeople.length}`,
             );
-            setText(item.querySelector("[data-nearby-name]"), person.name);
-            setText(item.querySelector("[data-nearby-job]"), person.jobTitle);
-            setText(
-                item.querySelector("[data-nearby-distance]"),
-                `${person.distanceKm.toFixed(1)} km`,
-            );
-            setText(
-                item.querySelector("[data-nearby-location-note]"),
-                tracked
-                    ? stale
-                        ? "Tab marker may be stale"
-                        : "Tab marker available"
-                    : "Location withheld by API",
-            );
-            button.addEventListener("click", () =>
-                selectPerson(person.id, Boolean(tracked)),
-            );
-            ui.nearbyList.append(item);
-        });
+            setHidden(ui.nearbyPagination, false);
+        }
     }
 
     function detailRow(term, description) {
@@ -1745,6 +1986,44 @@
         container.append(form);
     }
 
+    function closePersonDetail() {
+        if (!ui.detailDialog?.open) {
+            return;
+        }
+        const returnFocus = state.detailReturnFocus;
+        state.detailReturnFocus = null;
+        if (typeof ui.detailDialog.close === "function") {
+            ui.detailDialog.close();
+        } else {
+            ui.detailDialog.removeAttribute("open");
+        }
+        if (
+            returnFocus?.isConnected &&
+            typeof returnFocus.focus === "function"
+        ) {
+            returnFocus.focus({ preventScroll: true });
+        }
+    }
+
+    function openPersonDetail(invoker = document.activeElement) {
+        if (
+            invoker &&
+            !ui.detailDialog?.contains(invoker) &&
+            typeof invoker.focus === "function"
+        ) {
+            state.detailReturnFocus = invoker;
+        }
+        if (!ui.detailDialog || ui.detailDialog.open) {
+            return;
+        }
+        if (typeof ui.detailDialog.show === "function") {
+            ui.detailDialog.show();
+        } else {
+            ui.detailDialog.setAttribute("open", "");
+        }
+        ui.detailClose?.focus({ preventScroll: true });
+    }
+
     function renderDetail() {
         if (!ui.detailContent) {
             return;
@@ -1758,18 +2037,23 @@
         const person = nearbyPerson || trackedPerson;
 
         clearElement(ui.detailContent);
-        setHidden(ui.detailContent, !person);
-        setHidden(ui.detailEmpty, Boolean(person));
         if (!person) {
+            closePersonDetail();
             return;
         }
 
         const header = document.createElement("header");
         header.className = "detail-heading";
         const headingCopy = document.createElement("div");
+        const detailHeading = textElement(
+            "h3",
+            "person-detail__name",
+            person.name,
+        );
+        detailHeading.id = "person-detail-title";
         headingCopy.append(
             textElement("p", "eyebrow", nearbyPerson ? "Nearby person" : "Tab-tracked person"),
-            textElement("h3", "person-detail__name", person.name),
+            detailHeading,
         );
         header.append(headingCopy);
         if (nearbyPerson) {
@@ -1803,18 +2087,24 @@
         if (trackedPerson) {
             details.append(
                 detailRow(
-                    "Tab-submitted position",
+                    "Map position",
                     `${formatCoordinate(
                         trackedPerson.latitude,
                         5,
-                    )}, ${formatCoordinate(trackedPerson.longitude, 5)}`,
+                    )}, ${formatCoordinate(
+                        trackedPerson.longitude,
+                        5,
+                    )} · draggable in this tab`,
                 ),
             );
         } else {
             details.append(
                 detailRow(
-                    "Map position",
-                    "Withheld by the public nearby API.",
+                    "Read-only map position",
+                    `${formatCoordinate(
+                        nearbyPerson.latitude,
+                        5,
+                    )}, ${formatCoordinate(nearbyPerson.longitude, 5)}`,
                 ),
             );
         }
@@ -1842,7 +2132,30 @@
         renderNearbyList();
         renderDetail();
         renderPersonMarkers();
+        renderNearbyMarkers();
         updateCenterVisuals();
+    }
+
+    function updateListSelection(list, personId) {
+        if (!list) {
+            return;
+        }
+        list.querySelectorAll(".is-selected").forEach((item) => {
+            item.classList.remove("is-selected");
+            item
+                .querySelector("button")
+                ?.setAttribute("aria-current", "false");
+        });
+        if (!personId) {
+            return;
+        }
+        const selected = list.querySelector(
+            `[data-person-id="${personId}"]`,
+        );
+        selected?.classList.add("is-selected");
+        selected
+            ?.querySelector("button")
+            ?.setAttribute("aria-current", "true");
     }
 
     function selectPerson(personId, focusMap) {
@@ -1852,13 +2165,23 @@
         ) {
             return;
         }
+        const previousPersonId = state.selectedPersonId;
         state.selectedPersonId = personId;
-        renderAll();
+        updateListSelection(ui.sessionList, personId);
+        updateListSelection(ui.nearbyList, personId);
+        renderDetail();
+        openPersonDetail(document.activeElement);
+        renderPersonMarkers();
+        updateNearbyMarkerSelection(previousPersonId, personId);
 
         const tracked = state.sessionPeople.get(personId);
-        if (tracked && focusMap && state.map) {
-            state.map.panTo([tracked.latitude, tracked.longitude]);
-            state.personMarkers.get(personId)?.getElement()?.focus();
+        const nearby = nearbyPersonById(personId);
+        const located = nearby || tracked;
+        if (located && focusMap && state.map) {
+            state.map.panTo([located.latitude, located.longitude]);
+            if (tracked) {
+                state.personMarkers.get(personId)?.getElement()?.focus();
+            }
         }
     }
 
@@ -1871,6 +2194,27 @@
         ui.refreshNearby?.addEventListener("click", () =>
             scheduleNearbySearch(true),
         );
+        ui.nearbyPrevious?.addEventListener("click", () => {
+            state.nearbyListOffset = Math.max(
+                0,
+                state.nearbyListOffset - NEARBY_LIST_PAGE_SIZE,
+            );
+            renderNearbyList();
+            ui.nearbyList?.scrollIntoView({ block: "start" });
+        });
+        ui.nearbyNext?.addEventListener("click", () => {
+            const lastPageOffset =
+                Math.floor(
+                    Math.max(0, state.nearbyPeople.length - 1) /
+                        NEARBY_LIST_PAGE_SIZE,
+                ) * NEARBY_LIST_PAGE_SIZE;
+            state.nearbyListOffset = Math.min(
+                state.nearbyListOffset + NEARBY_LIST_PAGE_SIZE,
+                lastPageOffset,
+            );
+            renderNearbyList();
+            ui.nearbyList?.scrollIntoView({ block: "start" });
+        });
         ui.radiusInput?.addEventListener("input", applyRadiusInput);
         ui.radiusInput?.addEventListener("change", applyRadiusInput);
         ui.radiusRange?.addEventListener("input", applyRadiusInput);
@@ -1901,6 +2245,20 @@
         );
         ui.createForm?.addEventListener("submit", createPerson);
         ui.forgetSession?.addEventListener("click", forgetSessionPeople);
+        ui.detailClose?.addEventListener("click", closePersonDetail);
+        ui.detailDialog?.addEventListener("keydown", (event) => {
+            if (event.key === "Escape") {
+                event.preventDefault();
+                closePersonDetail();
+            }
+        });
+        ui.nearbyList?.addEventListener("click", (event) => {
+            const button = event.target.closest?.("[data-select-nearby]");
+            const item = button?.closest("[data-person-id]");
+            if (item?.dataset.personId) {
+                selectPerson(item.dataset.personId, true);
+            }
+        });
     }
 
     function initialize() {
@@ -1930,6 +2288,16 @@
         setMode("add", false);
         renderAll();
         scheduleNearbySearch(true);
+    }
+
+    if (typeof module !== "undefined" && module.exports) {
+        module.exports = Object.freeze({
+            isFiniteCoordinate,
+            normalizeNearbyPerson,
+            validNearbyLocation,
+            validNearbyPerson,
+        });
+        return;
     }
 
     if (document.readyState === "loading") {

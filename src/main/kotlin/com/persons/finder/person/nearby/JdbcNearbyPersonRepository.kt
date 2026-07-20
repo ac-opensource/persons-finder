@@ -1,5 +1,6 @@
 package com.persons.finder.person.nearby
 
+import com.persons.finder.person.model.GeoPoint
 import com.persons.finder.person.model.PersonId
 import com.persons.finder.person.model.PersonProfile
 import org.springframework.jdbc.core.JdbcTemplate
@@ -36,6 +37,11 @@ class JdbcNearbyPersonRepository(
                 createdAt = resultSet.getTimestamp("created_at").toInstant(),
                 lastKnownLocationAt =
                     resultSet.getTimestamp("last_known_location_at").toInstant(),
+                location =
+                    GeoPoint.from(
+                        latitude = resultSet.getDouble("latitude"),
+                        longitude = resultSet.getDouble("longitude"),
+                    ),
                 distanceKm = resultSet.getDouble("distance_metres") / METRES_PER_KILOMETRE,
             )
         }
@@ -56,6 +62,8 @@ internal val INDEXED_NEARBY_QUERY =
         person.bio,
         person.created_at,
         last_known.captured_at AS last_known_location_at,
+        ST_Y(last_known.location::geometry) AS latitude,
+        ST_X(last_known.location::geometry) AS longitude,
         ST_Distance(last_known.location, search.origin, true) AS distance_metres
     FROM last_known_location_projection AS last_known
     JOIN person

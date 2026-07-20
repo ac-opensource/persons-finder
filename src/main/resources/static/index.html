@@ -6,9 +6,9 @@
     <meta name="description" content="A local dashboard for creating, moving, and finding nearby people.">
     <title>Persons Finder Dashboard</title>
     <link rel="stylesheet" href="/webjars/leaflet/1.9.4/dist/leaflet.css">
-    <link rel="stylesheet" href="/assets/dashboard.css">
+    <link rel="stylesheet" href="/assets/dashboard.css?v=20260721-location-map-4">
     <script src="/webjars/leaflet/1.9.4/dist/leaflet.js" defer></script>
-    <script src="/assets/dashboard.js" defer></script>
+    <script src="/assets/dashboard.js?v=20260721-location-map-4" defer></script>
 </head>
 <body>
 <a class="skip-link" href="#map">Skip to the nearby map</a>
@@ -103,7 +103,7 @@
                 </div>
                 <span class="step-label">3</span>
             </div>
-            <p class="help-text">Markers show the last location submitted by this browser tab—not a complete map of backend records.</p>
+            <p class="help-text">People created in this tab stay draggable. Other nearby people use read-only API markers.</p>
 
             <div id="session-state" class="empty-state compact-empty" role="status" aria-live="polite">
                 <span class="empty-state-icon" aria-hidden="true">+</span>
@@ -132,7 +132,7 @@
 
         <div class="map-stage">
             <div id="tile-warning" class="map-message map-message-warning" role="status" aria-live="polite" hidden>
-                Basemap unavailable. API tools and tab-known markers still work.
+                Basemap unavailable. API results and location markers still work.
             </div>
             <div
                 id="map"
@@ -147,8 +147,8 @@
         </div>
 
         <footer class="map-caption">
-            <p><strong>API-authoritative.</strong> The geofence and result order follow <code>GET /persons/nearby</code>.</p>
-            <p>Drag a tab-known person marker to submit a new last-known location.</p>
+            <p><strong>API-authoritative.</strong> Nearby locations and result order follow <code>GET /persons/nearby</code>.</p>
+            <p>Nearby markers are read-only; tab-known markers can be dragged to submit a new location.</p>
         </footer>
     </section>
 
@@ -171,44 +171,20 @@
             <p>Results will appear in the exact order returned by the API.</p>
         </div>
         <ol id="nearby-list" class="nearby-list" aria-label="Nearby people in API order"></ol>
-
-        <section id="person-detail" class="person-detail" aria-label="Selected person details">
-            <div id="detail-empty" class="detail-empty">
-                <span class="empty-state-icon" aria-hidden="true">i</span>
-                <p>Select a nearby result to inspect its API details.</p>
-            </div>
-            <div id="detail-content" hidden>
-                <div class="detail-heading">
-                    <div>
-                        <p class="eyebrow">Selected person</p>
-                        <h3 id="detail-name"></h3>
-                    </div>
-                    <span id="detail-distance" class="distance-badge"></span>
-                </div>
-
-                <dl class="detail-list">
-                    <div>
-                        <dt>Job</dt>
-                        <dd id="detail-job"></dd>
-                    </div>
-                    <div>
-                        <dt>Hobbies</dt>
-                        <dd id="detail-hobbies"></dd>
-                    </div>
-                    <div>
-                        <dt>Bio</dt>
-                        <dd id="detail-bio"></dd>
-                    </div>
-                    <div>
-                        <dt>Last known</dt>
-                        <dd id="detail-last-known"></dd>
-                    </div>
-                </dl>
-                <p id="detail-location-note" class="location-note">Location withheld when this tab does not know the coordinates.</p>
-            </div>
-        </section>
+        <nav id="nearby-pagination" class="nearby-pagination" aria-label="Nearby result pages" hidden>
+            <button id="nearby-previous" class="button button-secondary" type="button">Previous 250</button>
+            <span id="nearby-page-status" class="nearby-page-status" aria-live="polite"></span>
+            <button id="nearby-next" class="button button-secondary" type="button">Next 250</button>
+        </nav>
     </aside>
 </main>
+
+<dialog id="person-detail-dialog" class="person-detail-dialog" aria-labelledby="person-detail-title">
+    <div class="person-detail-window">
+        <button id="close-person-detail" class="icon-button person-detail-close" type="button" aria-label="Close person details">×</button>
+        <div id="detail-content"></div>
+    </div>
+</dialog>
 
 <dialog id="create-dialog" class="person-dialog" aria-labelledby="create-person-title" aria-describedby="create-person-description">
     <form id="create-form">
@@ -341,7 +317,7 @@
             <span class="nearby-copy">
                 <strong data-nearby-name></strong>
                 <small data-nearby-job></small>
-                <small class="nearby-location-note" data-nearby-location-note>Location withheld</small>
+                <small class="nearby-location-note" data-nearby-location-note>Read-only map marker</small>
             </span>
             <span class="distance-badge" data-nearby-distance></span>
         </button>

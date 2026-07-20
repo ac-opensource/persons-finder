@@ -51,12 +51,12 @@ class FindNearbyControllerContractTest {
     }
 
     @Test
-    fun `GET nearby returns a bare privacy-safe array with one-decimal distance`() {
+    fun `GET nearby returns a bare array with nested location and one-decimal distance`() {
         mockMvc.perform(validRequest())
             .andExpect(status().isOk)
             .andExpect(content().contentTypeCompatibleWith(MediaType.APPLICATION_JSON))
             .andExpect(jsonPath("$.length()").value(2))
-            .andExpect(jsonPath("$[0].length()").value(8))
+            .andExpect(jsonPath("$[0].length()").value(9))
             .andExpect(jsonPath("$[0].id").value(FIRST_PERSON_ID))
             .andExpect(jsonPath("$[0].name").value("Aroha"))
             .andExpect(jsonPath("$[0].jobTitle").value("Software engineer"))
@@ -64,6 +64,9 @@ class FindNearbyControllerContractTest {
             .andExpect(jsonPath("$[0].bio").value("A quirky local profile."))
             .andExpect(jsonPath("$[0].createdAt").value("2026-07-19T05:06:07.123Z"))
             .andExpect(jsonPath("$[0].lastKnownLocationAt").value("2026-07-19T05:07:08.456Z"))
+            .andExpect(jsonPath("$[0].location.length()").value(2))
+            .andExpect(jsonPath("$[0].location.latitude").value(-41.2865))
+            .andExpect(jsonPath("$[0].location.longitude").value(174.7762))
             .andExpect(jsonPath("$[0].distanceKm").value(1.2))
             .andExpect(jsonPath("$[0].latitude").doesNotExist())
             .andExpect(jsonPath("$[0].longitude").doesNotExist())
@@ -201,6 +204,7 @@ class FindNearbyControllerContractTest {
                 bio = "A quirky local profile.",
                 createdAt = Instant.parse("2026-07-19T05:06:07.123Z"),
                 lastKnownLocationAt = Instant.parse("2026-07-19T05:07:08.456Z"),
+                location = GeoPoint.from(-41.2865, 174.7762),
                 distanceKm = distanceKm,
             )
     }

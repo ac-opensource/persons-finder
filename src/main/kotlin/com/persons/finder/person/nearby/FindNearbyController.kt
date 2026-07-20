@@ -109,6 +109,11 @@ private fun NearbyPerson.toResponse(): NearbyPersonResponse =
         bio = bio,
         createdAt = createdAt.asApiTimestamp(),
         lastKnownLocationAt = lastKnownLocationAt.asApiTimestamp(),
+        location =
+            NearbyPersonLocationResponse(
+                latitude = location.latitude,
+                longitude = location.longitude,
+            ),
         distanceKm =
             BigDecimal
                 .valueOf(distanceKm)

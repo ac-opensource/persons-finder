@@ -1,0 +1,803 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly BENCHMARK_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+readonly REPOSITORY_ROOT="$(cd "${BENCHMARK_DIR}/.." && pwd)"
+readonly COMPOSE_FILE="${BENCHMARK_DIR}/compose.yaml"
+readonly COMPOSE_PROJECT="persons-finder-benchmark"
+readonly COMPOSE_PROFILE="benchmark"
+readonly BENCHMARK_MARKER="persons-finder-benchmark-v1"
+readonly MAIN_DATABASE="persons_finder_benchmark"
+readonly SAMPLE_DATABASE="persons_finder_benchmark_appsample"
+readonly DATABASE_USER="persons_finder_benchmark"
+readonly BENCHMARK_VOLUME="persons-finder-benchmark-postgres-data-v1"
+readonly MAIN_BASE_URL="http://127.0.0.1:18081"
+readonly SAMPLE_BASE_URL="http://127.0.0.1:18082"
+readonly RESULTS_DIR="${BENCHMARK_DIR}/results"
+readonly SECRET_FILE="${REPOSITORY_ROOT}/.secrets/benchmark-database-password"
+
+fail() {
+    printf 'benchmark: %s\n' "$*" >&2
+    exit 1
+}
+
+require_command() {
+    command -v "$1" >/dev/null 2>&1 || fail "required command is missing: $1"
+}
+
+require_tools() {
+    require_command docker
+    require_command python3
+    require_command curl
+    require_command openssl
+    require_command git
+    local python_version
+    python_version="$(python3 -c 'import sys; print(sys.version_info.major * 100 + sys.version_info.minor)')"
+    [[ "${python_version}" -ge 309 ]] ||
+        fail "Python 3.9 or newer is required"
+}
+
+compose() {
+    env \
+        -u COMPOSE_FILE \
+        -u COMPOSE_PROJECT_NAME \
+        -u DATABASE_URL \
+        -u JDBC_DATABASE_URL \
+        -u SPRING_DATASOURCE_URL \
+        -u SPRING_DATASOURCE_USERNAME \
+        -u SPRING_DATASOURCE_PASSWORD \
+        -u POSTGRES_DB \
+        -u POSTGRES_USER \
+        -u POSTGRES_PASSWORD \
+        -u PGDATABASE \
+        -u PGHOST \
+        -u PGPORT \
+        -u PGSERVICE \
+        -u PGSERVICEFILE \
+        -u PGUSER \
+        docker compose \
+        --file "${COMPOSE_FILE}" \
+        --project-name "${COMPOSE_PROJECT}" \
+        --profile "${COMPOSE_PROFILE}" \
+        "$@"
+}
+
+prepare_secret() {
+    if [[ -f "${SECRET_FILE}" ]]; then
+        return
+    fi
+    mkdir -p "$(dirname "${SECRET_FILE}")"
+    chmod 700 "$(dirname "${SECRET_FILE}")"
+    openssl rand -hex 32 >"${SECRET_FILE}"
+    chmod 400 "${SECRET_FILE}"
+}
+
+resolved_config() {
+    compose config
+}
+
+assert_resolved_config() {
+    local config
+    config="$(resolved_config)"
+    grep -Fq "name: ${COMPOSE_PROJECT}" <<<"${config}" ||
+        fail "resolved Compose project is not ${COMPOSE_PROJECT}"
+    grep -Fq "POSTGRES_DB: ${MAIN_DATABASE}" <<<"${config}" ||
+        fail "resolved Compose database is not ${MAIN_DATABASE}"
+    grep -Fq "name: ${BENCHMARK_VOLUME}" <<<"${config}" ||
+        fail "resolved Compose volume is not ${BENCHMARK_VOLUME}"
+    grep -Fq "127.0.0.1" <<<"${config}" ||
+        fail "benchmark application edge is not loopback-only"
+    if grep -Fq "persons_finder_postgres_data" <<<"${config}"; then
+        fail "resolved benchmark Compose config references the normal development volume"
+    fi
+    if grep -Eq 'target: 5432|published: "?5432"?' <<<"${config}"; then
+        fail "resolved benchmark Compose config publishes the database port"
+    fi
+}
+
+database_container_id() {
+    compose ps --quiet database
+}
+
+assert_container_identity() {
+    local container_id project_label benchmark_label marker_label
+    container_id="$(database_container_id)"
+    [[ -n "${container_id}" ]] || fail "benchmark database container is not running"
+    project_label="$(
+        docker inspect \
+            --format '{{ index .Config.Labels "com.docker.compose.project" }}' \
+            "${container_id}"
+    )"
+    benchmark_label="$(
+        docker inspect \
+            --format '{{ index .Config.Labels "com.persons-finder.benchmark" }}' \
+            "${container_id}"
+    )"
+    marker_label="$(
+        docker inspect \
+            --format '{{ index .Config.Labels "com.persons-finder.benchmark.marker" }}' \
+            "${container_id}"
+    )"
+    [[ "${project_label}" == "${COMPOSE_PROJECT}" ]] ||
+        fail "database container belongs to unexpected Compose project: ${project_label}"
+    [[ "${benchmark_label}" == "true" ]] ||
+        fail "database container is missing the benchmark ownership label"
+    [[ "${marker_label}" == "${BENCHMARK_MARKER}" ]] ||
+        fail "database container has an unexpected benchmark marker"
+}
+
+psql_database() {
+    local database="$1"
+    shift
+    assert_container_identity
+    compose exec --no-TTY database \
+        psql \
+        --no-psqlrc \
+        --set ON_ERROR_STOP=1 \
+        --username "${DATABASE_USER}" \
+        --dbname "${database}" \
+        --set "expected_database=${database}" \
+        --set "expected_user=${DATABASE_USER}" \
+        --set "expected_marker=${BENCHMARK_MARKER}" \
+        "$@"
+}
+
+psql_main() {
+    psql_database "${MAIN_DATABASE}" "$@"
+}
+
+psql_sample() {
+    psql_database "${SAMPLE_DATABASE}" "$@"
+}
+
+assert_database_guard() {
+    psql_main \
+        --quiet \
+        --file /benchmarks/sql/safety.sql \
+        >/dev/null
+}
+
+assert_database_empty() {
+    local database="$1"
+    local empty
+    empty="$(
+        psql_database "${database}" \
+            --tuples-only \
+            --no-align \
+            --command "
+                SELECT (
+                    (SELECT count(*) FROM person) = 0
+                    AND (SELECT count(*) FROM location_observation) = 0
+                    AND (SELECT count(*) FROM last_known_location_projection) = 0
+                    AND to_regnamespace('benchmark') IS NULL
+                )::text
+            " |
+            tr -d '[:space:]'
+    )"
+    [[ "${empty}" == "true" ]] ||
+        fail "${database} is not empty; use the guarded reset before seeding"
+}
+
+source_fingerprint() {
+    python3 "${SCRIPT_DIR}/fingerprint_source.py" --root "${REPOSITORY_ROOT}"
+}
+
+assert_seed_ready() {
+    local control_exists state
+    control_exists="$(
+        psql_main \
+            --tuples-only \
+            --no-align \
+            --command "SELECT (to_regclass('benchmark.control') IS NOT NULL)::text" |
+            tr -d '[:space:]'
+    )"
+    [[ "${control_exists}" == "true" ]] ||
+        fail "benchmark seed is missing or incomplete; run './benchmarks/bin/benchmark reset' and then './benchmarks/bin/benchmark seed'"
+
+    state="$(
+        psql_main \
+            --tuples-only \
+            --no-align \
+            --command 'SELECT state FROM benchmark.control' |
+            tr -d '[:space:]'
+    )"
+    [[ "${state}" == "correctness_passed" ]] ||
+        fail "benchmark seed is not ready (state: ${state}); run './benchmarks/bin/benchmark reset' and then './benchmarks/bin/benchmark seed'"
+}
+
+assert_source_state_matches_seed() {
+    local current_sha seeded_sha current_fingerprint seeded_fingerprint
+    current_sha="$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
+    seeded_sha="$(
+        psql_main \
+            --tuples-only \
+            --no-align \
+            --command 'SELECT git_sha FROM benchmark.control' |
+            tr -d '[:space:]'
+    )"
+    [[ "${seeded_sha}" == "${current_sha}" ]] ||
+        fail "seeded git SHA ${seeded_sha} does not match current HEAD ${current_sha}"
+    current_fingerprint="$(source_fingerprint)"
+    seeded_fingerprint="$(
+        psql_main \
+            --tuples-only \
+            --no-align \
+            --command 'SELECT source_fingerprint FROM benchmark.control' |
+            tr -d '[:space:]'
+    )"
+    [[ "${seeded_fingerprint}" == "${current_fingerprint}" ]] ||
+        fail "benchmark source fingerprint changed after seeding"
+}
+
+create_run_dir() {
+    local prefix="$1"
+    local run_id run_dir
+    run_id="${prefix}-$(date -u '+%Y%m%dT%H%M%SZ')"
+    run_dir="${RESULTS_DIR}/${run_id}"
+    [[ ! -e "${run_dir}" ]] || fail "result directory already exists: ${run_dir}"
+    mkdir -p "${run_dir}"
+    chmod 0777 "${run_dir}"
+    printf '%s\n' "${run_dir}"
+}
+
+relative_result_path() {
+    local run_dir="$1"
+    printf '%s\n' "${run_dir#"${BENCHMARK_DIR}/"}"
+}
+
+capture_environment() {
+    local run_dir="$1"
+    local run_id
+    run_id="$(basename "${run_dir}")"
+    python3 "${SCRIPT_DIR}/capture_environment.py" \
+        --output "${run_dir}/environment.json" \
+        --git-sha "$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)" \
+        --source-fingerprint "$(source_fingerprint)" \
+        --run-id "${run_id}"
+}
+
+wait_for_stack() {
+    compose up --detach --build --wait
+    assert_resolved_config
+    assert_container_identity
+    curl --fail --silent --show-error \
+        "${MAIN_BASE_URL}/actuator/health/readiness" >/dev/null
+    curl --fail --silent --show-error \
+        "${SAMPLE_BASE_URL}/actuator/health/readiness" >/dev/null
+    assert_database_guard
+}
+
+command_config() {
+    require_tools
+    prepare_secret
+    assert_resolved_config
+    resolved_config
+}
+
+command_verify_safety() {
+    require_tools
+    prepare_secret
+    assert_resolved_config
+    assert_container_identity
+    assert_database_guard
+
+    local output_file
+    output_file="$(mktemp)"
+    if compose exec --no-TTY database \
+        psql \
+        --no-psqlrc \
+        --set ON_ERROR_STOP=1 \
+        --username "${DATABASE_USER}" \
+        --dbname "${MAIN_DATABASE}" \
+        --set expected_database=persons_finder \
+        --set "expected_user=${DATABASE_USER}" \
+        --set "expected_marker=${BENCHMARK_MARKER}" \
+        --file /benchmarks/sql/safety.sql \
+        >"${output_file}" 2>&1; then
+        fail "wrong-database safety probe unexpectedly succeeded"
+    fi
+    grep -Fq "SAFETY REFUSAL" "${output_file}" ||
+        fail "wrong-database probe failed without the expected safety refusal"
+    rm -f "${output_file}"
+    printf 'benchmark safety checks passed; wrong database was refused\n'
+}
+
+command_seed() {
+    require_tools
+    prepare_secret
+    assert_resolved_config
+    wait_for_stack
+
+    local run_dir git_sha source_hash result_relative
+    run_dir="$(create_run_dir seed)"
+    result_relative="$(relative_result_path "${run_dir}")"
+    git_sha="$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
+    source_hash="$(source_fingerprint)"
+    capture_environment "${run_dir}"
+    assert_database_empty "${MAIN_DATABASE}"
+    assert_database_empty "${SAMPLE_DATABASE}"
+
+    python3 "${SCRIPT_DIR}/app_path_sample.py" \
+        --base-url "${SAMPLE_BASE_URL}" \
+        --persons 100 \
+        --output "${run_dir}/sample-application-path.jsonl"
+
+    psql_sample \
+        --file /benchmarks/sql/sample_correctness.sql \
+        >"${run_dir}/sample-correctness.log" 2>&1
+
+    psql_main \
+        --set "git_sha=${git_sha}" \
+        --set "source_fingerprint=${source_hash}" \
+        --file /benchmarks/sql/seed.sql \
+        >"${run_dir}/seed.log" 2>&1
+
+    psql_main \
+        --file /benchmarks/sql/correctness.sql \
+        >"${run_dir}/correctness.log" 2>&1
+
+    psql_main \
+        --quiet \
+        --csv \
+        --command 'SELECT * FROM benchmark.seed_manifest' \
+        >"${run_dir}/seed-manifest.csv"
+    psql_main \
+        --quiet \
+        --csv \
+        --command 'SELECT * FROM benchmark.correctness_result ORDER BY check_id' \
+        >"${run_dir}/correctness.csv"
+
+    printf '{"schema_version":1,"phase":"seed","run_id":"%s","git_sha":"%s","source_fingerprint":"%s","raw_output":"%s"}\n' \
+        "$(basename "${run_dir}")" \
+        "${git_sha}" \
+        "${source_hash}" \
+        "${result_relative}" \
+        >"${run_dir}/manifest.json"
+    printf 'seed and correctness completed; raw output: %s\n' "${run_dir}"
+}
+
+pgbench_measure() {
+    local output_directory="$1"
+    local label="$2"
+    local script="$3"
+    local clients="$4"
+    local transactions="$5"
+    shift 5
+    mkdir -p "${output_directory}"
+    chmod 0777 "${output_directory}"
+    local relative_directory
+    relative_directory="$(relative_result_path "${output_directory}")"
+
+    compose exec --no-TTY database \
+        pgbench \
+        --no-vacuum \
+        --username="${DATABASE_USER}" \
+        --client="${clients}" \
+        --jobs="${clients}" \
+        --transactions=25 \
+        --file="${script}" \
+        "$@" \
+        "${MAIN_DATABASE}" \
+        >/dev/null
+
+    local repeat
+    for repeat in 1 2 3; do
+        compose exec --no-TTY database \
+            pgbench \
+            --no-vacuum \
+            --username="${DATABASE_USER}" \
+            --client="${clients}" \
+            --jobs="${clients}" \
+            --transactions="${transactions}" \
+            --log \
+            --log-prefix="/benchmarks/${relative_directory}/${label}-r${repeat}-" \
+            --file="${script}" \
+            "$@" \
+            "${MAIN_DATABASE}" \
+            >"${output_directory}/${label}-r${repeat}-summary.txt"
+    done
+}
+
+record_restart_cold() {
+    local run_dir="$1"
+    compose restart database app app-sample
+    compose up --detach --wait
+    assert_container_identity
+    assert_database_guard
+
+    local output_directory relative_directory
+    output_directory="${run_dir}/restart-cold-db"
+    mkdir -p "${output_directory}"
+    chmod 0777 "${output_directory}"
+    relative_directory="$(relative_result_path "${output_directory}")"
+    compose exec --no-TTY database \
+        pgbench \
+        --no-vacuum \
+        --username="${DATABASE_USER}" \
+        --client=1 \
+        --jobs=1 \
+        --transactions=1 \
+        --log \
+        --log-prefix="/benchmarks/${relative_directory}/restart-cold-" \
+        --file=/benchmarks/sql/nearby.pgbench.sql \
+        --define lon=174.7633 \
+        --define lat=-36.8485 \
+        --define radius_km=1.0 \
+        "${MAIN_DATABASE}" \
+        >"${output_directory}/summary.txt"
+}
+
+measure_nearby_database() {
+    local run_dir="$1"
+    local cardinalities="$2"
+    while IFS=, read -r scenario_id distribution latitude longitude radius_km rows distinct_rows; do
+        [[ "${scenario_id}" == "scenario_id" ]] && continue
+        pgbench_measure \
+            "${run_dir}/nearby-db" \
+            "${scenario_id}" \
+            /benchmarks/sql/nearby.pgbench.sql \
+            1 \
+            200 \
+            --define "lon=${longitude}" \
+            --define "lat=${latitude}" \
+            --define "radius_km=${radius_km}"
+    done <"${cardinalities}"
+}
+
+measure_nearby_http() {
+    local run_dir="$1"
+    local cardinalities="$2"
+    local scenario
+    while IFS=, read -r scenario distribution latitude longitude radius rows distinct_rows; do
+        [[ "${scenario}" == "scenario_id" ]] && continue
+        python3 "${SCRIPT_DIR}/http_runner.py" \
+            --base-url "${MAIN_BASE_URL}" \
+            --cardinalities "${cardinalities}" \
+            --scenario "${scenario}" \
+            --output "${run_dir}/nearby-http.jsonl" \
+            --mode latency \
+            --warmup 25 \
+            --iterations 200 \
+            --repeats 3
+    done <"${cardinalities}"
+
+    for scenario in dense-auckland-0_1km dense-auckland-1km dense-auckland-20km; do
+        for concurrency in 1 8; do
+            python3 "${SCRIPT_DIR}/http_runner.py" \
+                --base-url "${MAIN_BASE_URL}" \
+                --cardinalities "${cardinalities}" \
+                --scenario "${scenario}" \
+                --output "${run_dir}/nearby-http-throughput.jsonl" \
+                --mode throughput \
+                --warmup 25 \
+                --repeats 3 \
+                --concurrency "${concurrency}" \
+                --duration-seconds 60
+        done
+    done
+}
+
+measure_baseline_database() {
+    local run_dir="$1"
+    pgbench_measure \
+        "${run_dir}/baseline-db" \
+        indexed-100k \
+        /benchmarks/sql/baseline-indexed.pgbench.sql \
+        1 \
+        200 \
+        --define lon=174.7633 \
+        --define lat=-36.8485 \
+        --define radius_km=1.0
+    pgbench_measure \
+        "${run_dir}/baseline-db" \
+        unindexed-100k \
+        /benchmarks/sql/baseline-unindexed.pgbench.sql \
+        1 \
+        200 \
+        --define lon=174.7633 \
+        --define lat=-36.8485 \
+        --define radius_km=1.0
+}
+
+measure_history_database() {
+    local run_dir="$1"
+    pgbench_measure \
+        "${run_dir}/history-db" \
+        first-page-size-2 \
+        /benchmarks/sql/history-first.pgbench.sql \
+        1 \
+        200
+    pgbench_measure \
+        "${run_dir}/history-db" \
+        next-page-size-2 \
+        /benchmarks/sql/history-next.pgbench.sql \
+        1 \
+        200
+}
+
+capture_plans() {
+    local run_dir="$1"
+    mkdir -p "${run_dir}/plans"
+    psql_main \
+        --tuples-only \
+        --no-align \
+        --set lon=174.7633 \
+        --set lat=-36.8485 \
+        --set radius_km=1.0 \
+        --command 'EXPLAIN (ANALYZE, BUFFERS, SETTINGS, FORMAT JSON)
+            WITH search AS (
+                SELECT ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography AS origin,
+                       :radius_km::double precision * 1000.0 AS radius_metres
+            )
+            SELECT person.id,
+                   ST_Distance(projection.location, search.origin, true) AS distance_metres
+            FROM last_known_location_projection AS projection
+            JOIN person ON person.id = projection.person_id
+            CROSS JOIN search
+            WHERE ST_DWithin(projection.location, search.origin, search.radius_metres, true)
+            ORDER BY distance_metres, person.id' \
+        >"${run_dir}/plans/nearby-dense-1km.json"
+    if grep -Fq "location_observation" "${run_dir}/plans/nearby-dense-1km.json"; then
+        fail "production nearby plan unexpectedly reads location_observation"
+    fi
+    grep -Fq "last_known_location_projection_location_gist_idx" \
+        "${run_dir}/plans/nearby-dense-1km.json" ||
+        fail "selective production nearby plan did not use the projection GiST"
+
+    psql_main \
+        --tuples-only \
+        --no-align \
+        --set lon=174.7633 \
+        --set lat=-36.8485 \
+        --set radius_km=1.0 \
+        --command 'EXPLAIN (ANALYZE, BUFFERS, SETTINGS, FORMAT JSON)
+            WITH search AS (
+                SELECT ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography AS origin,
+                       :radius_km::double precision * 1000.0 AS radius_metres
+            )
+            SELECT projection.person_id,
+                   ST_Distance(projection.location, search.origin, true) AS distance_metres
+            FROM benchmark.projection_subset_indexed AS projection
+            CROSS JOIN search
+            WHERE ST_DWithin(projection.location, search.origin, search.radius_metres, true)
+            ORDER BY distance_metres, projection.person_id' \
+        >"${run_dir}/plans/baseline-indexed-100k.json"
+
+    psql_main \
+        --tuples-only \
+        --no-align \
+        --set lon=174.7633 \
+        --set lat=-36.8485 \
+        --set radius_km=1.0 \
+        --command 'EXPLAIN (ANALYZE, BUFFERS, SETTINGS, FORMAT JSON)
+            WITH search AS (
+                SELECT ST_SetSRID(ST_MakePoint(:lon, :lat), 4326)::geography AS origin,
+                       :radius_km::double precision * 1000.0 AS radius_metres
+            )
+            SELECT projection.person_id,
+                   ST_Distance(projection.location, search.origin, true) AS distance_metres
+            FROM benchmark.projection_subset_unindexed AS projection
+            CROSS JOIN search
+            WHERE ST_Distance(projection.location, search.origin, true)
+                <= search.radius_metres
+            ORDER BY distance_metres, projection.person_id' \
+        >"${run_dir}/plans/baseline-unindexed-100k.json"
+
+    psql_main \
+        --tuples-only \
+        --no-align \
+        --command "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, FORMAT JSON)
+            SELECT id, captured_at, received_at, source
+            FROM location_observation
+            WHERE person_id = benchmark.deterministic_uuid('person', 1)
+            ORDER BY captured_at DESC, received_at DESC, id DESC
+            LIMIT 2" \
+        >"${run_dir}/plans/history-first-page.json"
+
+    psql_main \
+        --tuples-only \
+        --no-align \
+        --command "EXPLAIN (ANALYZE, BUFFERS, SETTINGS, FORMAT JSON)
+            SELECT observation.id,
+                   observation.captured_at,
+                   observation.received_at,
+                   observation.source
+            FROM location_observation AS observation
+            JOIN benchmark.history_cursor AS cursor
+                ON cursor.person_id = observation.person_id
+            WHERE observation.person_id = benchmark.deterministic_uuid('person', 1)
+              AND (
+                  observation.captured_at,
+                  observation.received_at,
+                  observation.id
+              ) < (
+                  cursor.captured_at,
+                  cursor.received_at,
+                  cursor.observation_id
+              )
+            ORDER BY observation.captured_at DESC,
+                     observation.received_at DESC,
+                     observation.id DESC
+            LIMIT 2" \
+        >"${run_dir}/plans/history-next-page.json"
+}
+
+measure_writes_database() {
+    local run_dir="$1"
+    psql_main --quiet --csv --file /benchmarks/sql/write_counts.sql \
+        >"${run_dir}/write-counts-before.csv"
+    pgbench_measure \
+        "${run_dir}/writes-db" \
+        winning-append \
+        /benchmarks/sql/write-winning.pgbench.sql \
+        8 \
+        1000
+    psql_main --quiet --csv --file /benchmarks/sql/write_counts.sql \
+        >"${run_dir}/write-counts-after-winning.csv"
+    pgbench_measure \
+        "${run_dir}/writes-db" \
+        late-append \
+        /benchmarks/sql/write-late.pgbench.sql \
+        8 \
+        1000
+    psql_main --quiet --csv --file /benchmarks/sql/write_counts.sql \
+        >"${run_dir}/write-counts-after-late.csv"
+    pgbench_measure \
+        "${run_dir}/writes-db" \
+        client-replay \
+        /benchmarks/sql/write-client-replay.pgbench.sql \
+        8 \
+        1000
+    psql_main --quiet --csv --file /benchmarks/sql/write_counts.sql \
+        >"${run_dir}/write-counts-after-client-replay.csv"
+    pgbench_measure \
+        "${run_dir}/writes-db" \
+        no-key-replay \
+        /benchmarks/sql/write-no-key-replay.pgbench.sql \
+        8 \
+        1000
+    psql_main --quiet --csv --file /benchmarks/sql/write_counts.sql \
+        >"${run_dir}/write-counts-after-db.csv"
+}
+
+measure_writes_http() {
+    local run_dir="$1"
+    psql_main \
+        --quiet \
+        --csv \
+        --file /benchmarks/sql/http_write_fixtures.sql \
+        >"${run_dir}/http-write-fixtures.csv"
+    python3 "${SCRIPT_DIR}/http_write_runner.py" \
+        --base-url "${MAIN_BASE_URL}" \
+        --fixtures "${run_dir}/http-write-fixtures.csv" \
+        --output "${run_dir}/writes-http.jsonl" \
+        --concurrency 8
+    psql_main --quiet --csv --file /benchmarks/sql/write_counts.sql \
+        >"${run_dir}/write-counts-after-http.csv"
+}
+
+command_run() {
+    require_tools
+    prepare_secret
+    assert_resolved_config
+    wait_for_stack
+    assert_seed_ready
+    assert_source_state_matches_seed
+
+    local run_dir git_sha source_hash cardinalities
+    run_dir="$(create_run_dir run)"
+    git_sha="$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
+    source_hash="$(source_fingerprint)"
+    capture_environment "${run_dir}"
+
+    psql_main --file /benchmarks/sql/assert_run_ready.sql >/dev/null
+    psql_main --quiet --csv --file /benchmarks/sql/database_environment.sql \
+        >"${run_dir}/database-environment.csv"
+    cardinalities="${run_dir}/cardinalities.csv"
+    psql_main --quiet --csv --file /benchmarks/sql/cardinalities.sql \
+        >"${cardinalities}"
+
+    record_restart_cold "${run_dir}"
+    measure_nearby_database "${run_dir}" "${cardinalities}"
+    measure_nearby_http "${run_dir}" "${cardinalities}"
+    measure_baseline_database "${run_dir}"
+    measure_history_database "${run_dir}"
+    capture_plans "${run_dir}"
+    measure_writes_database "${run_dir}"
+    measure_writes_http "${run_dir}"
+
+    psql_main --file /benchmarks/sql/complete_run.sql >/dev/null
+    printf '{"schema_version":1,"phase":"run","run_id":"%s","git_sha":"%s","source_fingerprint":"%s","completed":true}\n' \
+        "$(basename "${run_dir}")" \
+        "${git_sha}" \
+        "${source_hash}" \
+        >"${run_dir}/manifest.json"
+    printf 'benchmark run completed; raw output: %s\n' "${run_dir}"
+}
+
+assert_volume_identity() {
+    if ! docker volume inspect "${BENCHMARK_VOLUME}" >/dev/null 2>&1; then
+        return
+    fi
+    local benchmark_label marker_label project_label
+    benchmark_label="$(
+        docker volume inspect \
+            --format '{{ index .Labels "com.persons-finder.benchmark" }}' \
+            "${BENCHMARK_VOLUME}"
+    )"
+    marker_label="$(
+        docker volume inspect \
+            --format '{{ index .Labels "com.persons-finder.benchmark.marker" }}' \
+            "${BENCHMARK_VOLUME}"
+    )"
+    project_label="$(
+        docker volume inspect \
+            --format '{{ index .Labels "com.docker.compose.project" }}' \
+            "${BENCHMARK_VOLUME}"
+    )"
+    [[ "${benchmark_label}" == "true" ]] ||
+        fail "refusing reset: volume lacks benchmark ownership label"
+    [[ "${marker_label}" == "${BENCHMARK_MARKER}" ]] ||
+        fail "refusing reset: volume marker does not match"
+    [[ "${project_label}" == "${COMPOSE_PROJECT}" ]] ||
+        fail "refusing reset: volume belongs to Compose project ${project_label}"
+}
+
+command_reset() {
+    require_tools
+    prepare_secret
+    assert_resolved_config
+    local container_id
+    container_id="$(database_container_id)"
+    if [[ -n "${container_id}" ]]; then
+        assert_container_identity
+        assert_database_guard
+    fi
+    assert_volume_identity
+    compose down --volumes --remove-orphans
+    if docker volume inspect "${BENCHMARK_VOLUME}" >/dev/null 2>&1; then
+        fail "guarded reset completed but benchmark volume still exists"
+    fi
+    printf 'removed benchmark project containers and guarded volume; raw results preserved\n'
+}
+
+command_summarize() {
+    require_tools
+    local run_id="${1:-}"
+    [[ -n "${run_id}" ]] || fail "summarize requires a completed run ID"
+    [[ "${run_id}" != */* ]] || fail "run ID must not contain a path separator"
+    local run_dir="${RESULTS_DIR}/${run_id}"
+    [[ -d "${run_dir}" ]] || fail "run directory does not exist: ${run_dir}"
+    python3 "${SCRIPT_DIR}/summarize_raw.py" --run-dir "${run_dir}"
+    printf 'created raw-derived summary: %s\n' "${run_dir}/summary.md"
+}
+
+usage() {
+    cat <<'USAGE'
+Usage: ./benchmarks/bin/benchmark <command>
+
+Commands:
+  config         Print and validate resolved benchmark Compose configuration.
+  seed           Build/start, application-sample, seed 1M/5M/1M, correctness.
+  run            Execute measurements once against a fresh passing seed.
+  verify-safety  Verify live identity and wrong-database refusal.
+  reset          Delete only the guarded benchmark project volume; keep results.
+  summarize ID   Create summary.md only from a completed raw run.
+USAGE
+}
+
+main() {
+    cd "${REPOSITORY_ROOT}"
+    case "${1:-}" in
+        config) command_config ;;
+        seed) command_seed ;;
+        run) command_run ;;
+        verify-safety) command_verify_safety ;;
+        reset) command_reset ;;
+        summarize) command_summarize "${2:-}" ;;
+        *) usage; exit 2 ;;
+    esac
+}
+
+main "$@"
