@@ -275,12 +275,12 @@ execution/evidence extension, it contains:
 - sanitized hard-boundary and harness-error counts; and
 - the boolean synthetic retention/data-use approval that authorized the run.
 
-The tracked paid aggregate reports below remain unchanged schema-version-4
-evidence and were not backfilled. They do not contain grounded-length fields;
-their absence means unknown, not zero. Version 5 measures the already required
-composition against synthetic strings at the maximum approved source lengths;
-these numbers are structural worst-case measurements, not customer profile
-lengths.
+The two earlier tracked paid aggregate reports below remain unchanged
+schema-version-4 evidence and were not backfilled. They do not contain
+grounded-length fields; their absence means unknown, not zero. Version 5
+measures the already required composition against synthetic strings at the
+maximum approved source lengths; these numbers are structural worst-case
+measurements, not customer profile lengths.
 
 Smoke report schema version 2 adds its fixed-fixture hash,
 planned/attempted/not-attempted
@@ -310,10 +310,12 @@ The exact reviewed sanitized reports are:
 - the [pre-fix smoke](evidence/live-ai/openai-0d53d270729118e11023f2fdbf053accc82f717a-smoke-failed.json);
 - the first [post-fix smoke](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-smoke-passed.json)
   and [12-case calibration](evidence/live-ai/openai-d7d7345b5f7e8a8946958b2eca82ef5ef1ba1484-eval-12-passed.json)
-  under the deliberately high diagnostic cap; and
+  under the deliberately high diagnostic cap;
 - the final-limit [smoke](evidence/live-ai/openai-369e70c0de131bdd93f54a485d4fb0564439202c-smoke-256-passed.json)
   and [12-case calibration](evidence/live-ai/openai-369e70c0de131bdd93f54a485d4fb0564439202c-eval-12-256-passed.json)
-  at 256 output tokens.
+  at 256 output tokens; and
+- the schema-version-5 [metric-complete 12-case calibration](evidence/live-ai/openai-82ecbcef51b0eaeee0319704391df7aec6d7a46b-eval-12-256-v5-passed.json)
+  at the same final limits.
 
 The first three-call smoke at revision
 `0d53d270729118e11023f2fdbf053accc82f717a` received three HTTP 200
@@ -350,13 +352,26 @@ smoke additionally recorded a maximum final grounded length of 202 code points;
 the historical schema-version-4 aggregate did not record grounded lengths.
 Aggregate latency was 1.480 seconds at p50 and 5.591 seconds at p95/max.
 
-Across all five reports, 33 provider calls reported 8,280 input and 1,654 output
-tokens. At the [published model rates used for the runs](https://developers.openai.com/api/docs/pricing),
-estimated usage was USD 0.018204; `actual_billed_usd` remains unavailable
+At clean revision `82ecbcef51b0eaeee0319704391df7aec6d7a46b`, a
+schema-version-5 one-repetition calibration returned 12/12 valid distinct bios
+with no catalog match. Its 12 content-free attempt records account for all 12
+grounded measurements under `maximum_approved_source_lengths_v1`: the maximum
+was 408 code points against the 732-point contract, with no missing
+measurement. All requests and responses passed the same security and structural
+gates. The run reported 3,006 input and 589 output tokens, zero
+cached/reasoning/tool tokens, a maximum of 59 output tokens, 188 authored code
+points, and two sentences. Latency was 1.394 seconds at p50 and 3.060 seconds at
+p95/max.
+
+Across all six reports, 45 provider calls reported 11,286 input and 2,243 output
+tokens. At the [standard published model rates used for the runs](https://developers.openai.com/api/docs/pricing)
+of USD 1.00 per million input tokens and USD 6.00 per million output tokens,
+estimated usage was USD 0.024744; `actual_billed_usd` remains unavailable
 without a provider billing export. These runs establish live compatibility and
-provide limit-calibration evidence. Each 12-case run's zero-failure one-sided
-95% Wilson upper bound is approximately 18.4%, so neither is a production
-reliability claim.
+provide limit-calibration evidence. The 42 post-fix calls were all valid, and
+the 27 calls at the final 256/512/732 limits were all valid. Each 12-case run's
+zero-failure one-sided 95% Wilson upper bound is approximately 18.4%, so none is
+a production reliability claim.
 
 The Wilson bound is conditional on this fixed, equally weighted synthetic
 corpus and the provider conditions during the recorded run. It is not a claim
@@ -365,11 +380,12 @@ recorded `cyclic_rotation_v1` strategy to reduce systematic coupling between
 one case and its position in repeated runs. Per-case and overlapping-slice
 intervals are descriptive; they are not simultaneous 95% guarantees.
 
-Passing this protocol establishes reliable production of prose that satisfies
-the application-owned structural and security contract under the recorded
-provider conditions. It does not establish that the prose is delightful,
-meaningfully personalized beyond the safe categories, or preferred by people;
-that would require a separately approved qualitative review protocol.
+A passing recorded run establishes only that the observed calls satisfied the
+application-owned structural and security contract under those provider
+conditions. It does not establish production reliability, that the prose is
+delightful, meaningfully personalized beyond the safe categories, or preferred
+by people; those claims require separately approved reliability and qualitative
+review protocols.
 
 Do not commit or publish a report without a separate privacy and evidence
 review. A scheduled workflow, recurring credential use, retention policy, or

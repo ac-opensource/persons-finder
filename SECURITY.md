@@ -137,9 +137,10 @@ The following controls are not implemented:
 
 - production reliability evidence for the remote model. A paid OpenAI
   compatibility smoke initially exposed repeated placeholders; after the
-  provider-side constraint was added, two three-call smokes and two separate
-  12-case calibration runs produced 30 valid results with no retry or top-up.
-  The final 15 used the calibrated 256/512/732 limits. Those small fixed runs
+  provider-side constraint was added, two three-call smokes and three separate
+  12-case calibration runs produced 42 valid results with no retry or top-up.
+  The final 27 used the calibrated 256/512/732 limits; the latest aggregate
+  recorded all 12 maximum-source grounded lengths. Those small fixed runs
   establish compatibility and support the limits, but they do not satisfy the
   separately designed 456-call reliability protocol or predict future provider
   behavior;
