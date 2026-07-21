@@ -424,19 +424,25 @@ measurement.
 
 Headline results from the completed local run:
 
+The HTTP figures are end-to-end `GET /persons/nearby` API measurements against
+the same seeded PostgreSQL database. Each sample includes real request parsing
+and validation, the production indexed repository query, JDBC row mapping,
+response construction, JSON serialization, and loopback HTTP transfer; these
+are not SQL-only or mocked-client measurements.
+
 | Measure | Result |
 | --- | ---: |
 | Selective nearby database, worst p95 / p99 (1-125 rows) | 2.154 / 3.263 ms |
-| Selective nearby HTTP, worst p95 / p99 (1-125 rows) | 4.543 / 8.344 ms |
+| End-to-end `GET /persons/nearby` API with database, worst p95 / p99 (1-125 rows) | 4.543 / 8.344 ms |
 | Controlled indexed vs unindexed p95 | 0.699 vs 92.812 ms (132.8x) |
-| HTTP throughput, 1-row response, concurrency 1 / 8 | 735.95 / 2,355.30 requests/s |
-| HTTP throughput, 50,001-row response, concurrency 1 / 8 | 2.17 / 4.30 requests/s |
+| `GET /persons/nearby` API throughput, 1-row response, concurrency 1 / 8 | 735.95 / 2,355.30 requests/s |
+| `GET /persons/nearby` API throughput, 50,001-row response, concurrency 1 / 8 | 2.17 / 4.30 requests/s |
 | Winning-append throughput retained vs late append | 85.3% |
 
-The 50,001-row HTTP response was about 19.9 MB with p95 413.853 ms at
-concurrency 1. Response cardinality/payload is the principal measured
-high-cardinality bottleneck; see the result document for the database/HTTP
-curves, write deltas, five-plan set, environment, and limitations.
+The 50,001-row `GET /persons/nearby` API response was about 19.9 MB with p95
+413.853 ms at concurrency 1. Response cardinality/payload is the principal
+measured high-cardinality bottleneck; see the result document for the
+database/HTTP curves, write deltas, five-plan set, environment, and limitations.
 
 The one-shot measurement entry point accepts only a fresh passing seed:
 
