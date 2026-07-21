@@ -24,7 +24,7 @@ class LiveBioEvalProtocolTest {
                 maximumFailureUpperBound = 0.01,
                 maxOutputTokens = 256,
                 modelAuthoredCodePointLimit = 512,
-                finalGroundedCodePointLimit = 732,
+                finalGroundedCodePointLimit = 1_272,
                 generationDeadline = Duration.ofSeconds(15),
             )
         }
@@ -40,7 +40,7 @@ class LiveBioEvalProtocolTest {
             approved().copy(maximumFailureUpperBound = 0.02),
             approved().copy(maxOutputTokens = 255),
             approved().copy(modelAuthoredCodePointLimit = 511),
-            approved().copy(finalGroundedCodePointLimit = 731),
+            approved().copy(finalGroundedCodePointLimit = 1_293),
             approved().copy(generationDeadline = Duration.ofSeconds(14)),
         ).forEach { invalid ->
             assertThrows<IllegalArgumentException> {
@@ -96,7 +96,7 @@ class LiveBioEvalProtocolTest {
             maximumFailureUpperBound = 0.01,
             maxOutputTokens = 256,
             modelAuthoredCodePointLimit = 512,
-            finalGroundedCodePointLimit = 732,
+            finalGroundedCodePointLimit = 1_272,
             generationDeadline = Duration.ofSeconds(15),
         )
 

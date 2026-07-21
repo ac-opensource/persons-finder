@@ -26,6 +26,7 @@ class BioGeneratorConformanceTest {
                     BioTemplateRequest(
                         jobCategory = SafeJobCode.OTHER,
                         interests = listOf(SafeInterestCode.OTHER),
+                        hobbyCount = BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS,
                     ),
                 ).forEach { request ->
                     val result =
@@ -35,18 +36,18 @@ class BioGeneratorConformanceTest {
                         )
                     assertTrue(result is BioGenerationResult.Template, "$name -> $result")
                     val template = (result as BioGenerationResult.Template).value
-                    TemplateToken.entries.forEach { token ->
+                    requiredTemplateTokens(request.hobbyCount).forEach { token ->
                         assertEquals(
                             1,
                             template.value.windowed(token.literal.length).count { it == token.literal },
-                            "$name/${token.name}",
+                            "$name/${token.literal}",
                         )
                     }
                     assertFalse(template.value.contains("North Island"))
                     assertFalse(template.value.contains("South Island"))
                     assertEquals(
                         BioGenerationResult.Template(template),
-                        GeneratedBioTemplate.validate(template.value),
+                        GeneratedBioTemplate.validate(template.value, request.hobbyCount),
                     )
                 }
             }
@@ -98,18 +99,33 @@ class BioGeneratorConformanceTest {
     }
 
     private fun conformingGenerators(): List<Pair<String, BioGenerator>> =
-        listOf(
-            "deterministic" to DeterministicBioGenerator(),
-            "remote" to
-                RemoteBioGenerator(
-                    ModelProviderClient {
-                        ModelProviderResult.Generated(
-                            """{"bio_template":"{{NAME}} turns {{HOBBY}} into a quirky side quest after a day as a {{JOB}}."}""",
-                        )
-                    },
-                    JsonMapper.builder().build(),
-                ),
-        )
+        JsonMapper.builder().build().let { objectMapper ->
+            listOf(
+                "deterministic" to DeterministicBioGenerator(),
+                "remote" to
+                    RemoteBioGenerator(
+                        ModelProviderClient { request ->
+                            val hobbyCount =
+                                objectMapper.readTree(request.inputJson)
+                                    .path("hobby_placeholders")
+                                    .size()
+                            val hobbyBeats =
+                                (0 until hobbyCount).joinToString("; ") { index ->
+                                    "{{HOBBY[$index]}} adds a quirky beat"
+                                }
+                            ModelProviderResult.Generated(
+                                objectMapper.writeValueAsString(
+                                    mapOf(
+                                        "bio_template" to
+                                            "{{NAME}} is a {{JOB}}: $hobbyBeats.",
+                                    ),
+                                ),
+                            )
+                        },
+                        objectMapper,
+                    ),
+            )
+        }
 
     private fun safeRequest() =
         BioTemplateRequest(

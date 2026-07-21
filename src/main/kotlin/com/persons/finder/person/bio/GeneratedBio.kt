@@ -11,12 +11,16 @@ import java.util.Locale
 @JvmInline
 value class GeneratedBioTemplate private constructor(val value: String) {
     companion object {
-        fun validate(candidate: String): BioGenerationResult =
-            validateWithDiagnostic(candidate).result
+        fun validate(
+            candidate: String,
+            hobbyCount: Int = 1,
+        ): BioGenerationResult = validateWithDiagnostic(candidate, hobbyCount).result
 
         internal fun validateWithDiagnostic(
             candidate: String,
+            hobbyCount: Int = 1,
         ): DiagnosedBioTemplateValidation {
+            val requiredTokens = requiredTemplateTokens(hobbyCount)
             val normalized =
                 if (candidate.isWellFormedUtf16()) {
                     Normalizer.normalize(candidate.trimUnicodeWhitespace(), Normalizer.Form.NFC)
@@ -28,7 +32,8 @@ value class GeneratedBioTemplate private constructor(val value: String) {
             val rejection =
                 when {
                     normalized.isEmpty() -> GeneratedBioTemplateRejectionReason.EMPTY
-                    normalized.codePointCount(0, normalized.length) > MAX_TEMPLATE_CODE_POINTS ->
+                    normalized.codePointCount(0, normalized.length) >
+                        maxTemplateCodePoints(requiredTokens) ->
                         GeneratedBioTemplateRejectionReason.TOTAL_CODE_POINT_LIMIT
 
                     normalized.codePoints().anyMatch(::isForbiddenTemplateCodePoint) ->
@@ -37,7 +42,7 @@ value class GeneratedBioTemplate private constructor(val value: String) {
                     !TEMPLATE_CHARACTERS.matches(normalized) ->
                         GeneratedBioTemplateRejectionReason.CHARACTER_POLICY
 
-                    REQUIRED_TOKENS.any { token -> normalized.literalCount(token) != 1 } ->
+                    !normalized.hasExactPlaceholderSet(requiredTokens) ->
                         GeneratedBioTemplateRejectionReason.PLACEHOLDER_CARDINALITY
 
                     hasUnknownOrMutatedPlaceholder(normalized) ->
@@ -71,23 +76,47 @@ value class GeneratedBioTemplate private constructor(val value: String) {
             }
         }
 
-        internal fun fromCatalog(templateId: BioTemplateId): GeneratedBioTemplate {
+        internal fun fromCatalog(
+            templateId: BioTemplateId,
+            hobbyCount: Int = 1,
+        ): GeneratedBioTemplate {
+            val hobbyStory = catalogHobbyStory(templateId, hobbyCount)
             val candidate =
                 when (templateId) {
                     BioTemplateId.QUIRKY_SIDE_QUEST ->
-                        "Meet {{NAME}}, a very quirky {{JOB}} who enjoys {{HOBBY}}."
+                        "Meet {{NAME}}, a very quirky {{JOB}}: $hobbyStory."
 
                     BioTemplateId.DELIGHTFUL_TWIST ->
-                        "{{NAME}} is one quirky {{JOB}} with a knack for {{HOBBY}}."
+                        "{{NAME}} is one quirky {{JOB}}: $hobbyStory."
 
                     BioTemplateId.CURIOUS_ADVENTURE ->
-                        "Quirky {{JOB}} {{NAME}} makes {{HOBBY}} a daily adventure."
+                        "Quirky {{JOB}} {{NAME}}: $hobbyStory."
                 }
-            return when (val result = validate(candidate)) {
+            return when (val result = validate(candidate, hobbyCount)) {
                 is BioGenerationResult.Template -> result.value
                 is BioGenerationResult.Failure ->
                     error("Application-owned template catalog is invalid: ${result.reason}")
             }
+        }
+
+        private fun catalogHobbyStory(
+            templateId: BioTemplateId,
+            hobbyCount: Int,
+        ): String {
+            val beats =
+                when (templateId) {
+                    BioTemplateId.QUIRKY_SIDE_QUEST ->
+                        listOf("opens the side quest", "adds the plot twist", "powers the finale")
+
+                    BioTemplateId.DELIGHTFUL_TWIST ->
+                        listOf("keeps ideas bright", "brings delightful chaos", "earns an encore")
+
+                    BioTemplateId.CURIOUS_ADVENTURE ->
+                        listOf("sparks curiosity", "fuels the next detour", "makes the day an adventure")
+                }
+            return hobbyPlaceholders(hobbyCount)
+                .mapIndexed { index, placeholder -> "$placeholder ${beats[index % beats.size]}" }
+                .joinToString("; ")
         }
     }
 }
@@ -142,9 +171,9 @@ internal fun observeBioTemplate(candidate: String): ObservedBioTemplateMetrics {
             wellFormedUnicode = false,
             codePoints = null,
             modelAuthoredCodePoints = null,
-            namePlaceholderCount = candidate.literalCount(TemplateToken.NAME.literal),
-            jobPlaceholderCount = candidate.literalCount(TemplateToken.JOB.literal),
-            hobbyPlaceholderCount = candidate.literalCount(TemplateToken.HOBBY.literal),
+            namePlaceholderCount = candidate.literalCount(TemplateToken.Name.literal),
+            jobPlaceholderCount = candidate.literalCount(TemplateToken.Job.literal),
+            hobbyPlaceholderCount = candidate.hobbyPlaceholderCount(),
             sentenceCount = null,
             printableAscii = null,
         )
@@ -155,9 +184,9 @@ internal fun observeBioTemplate(candidate: String): ObservedBioTemplateMetrics {
         wellFormedUnicode = true,
         codePoints = normalized.codePointCount(0, normalized.length),
         modelAuthoredCodePoints = normalized.templateLiteralCodePointCount(),
-        namePlaceholderCount = normalized.literalCount(TemplateToken.NAME.literal),
-        jobPlaceholderCount = normalized.literalCount(TemplateToken.JOB.literal),
-        hobbyPlaceholderCount = normalized.literalCount(TemplateToken.HOBBY.literal),
+        namePlaceholderCount = normalized.literalCount(TemplateToken.Name.literal),
+        jobPlaceholderCount = normalized.literalCount(TemplateToken.Job.literal),
+        hobbyPlaceholderCount = normalized.hobbyPlaceholderCount(),
         sentenceCount = normalized.observedSentenceCount(),
         printableAscii = normalized.codePoints().allMatch { it in PRINTABLE_ASCII_CODE_POINTS },
     )
@@ -181,17 +210,13 @@ value class GeneratedBio private constructor(val value: String) {
         internal fun compose(
             template: GeneratedBioTemplate,
             profile: PersonProfile,
-            selectedHobby: String,
         ): GeneratedBio {
-            require(selectedHobby in profile.hobbies) {
-                "Grounding hobby must be one of the validated profile hobbies"
-            }
             return compose(
                 template,
                 BioGrounding(
                     name = profile.name,
                     jobTitle = profile.jobTitle,
-                    hobby = selectedHobby,
+                    hobbies = profile.hobbies,
                 ),
             )
         }
@@ -200,25 +225,25 @@ value class GeneratedBio private constructor(val value: String) {
             template: GeneratedBioTemplate,
             grounding: BioGrounding,
         ): GeneratedBio {
+            val requiredTokens = requiredTemplateTokens(grounding.hobbies.size)
             val segments = parseTemplate(template.value)
+            val groundedTokens =
+                segments.filterIsInstance<TemplateSegment.Placeholder>().map { it.token }
+            require(
+                groundedTokens.size == requiredTokens.size &&
+                    groundedTokens.toSet() == requiredTokens.toSet() &&
+                    requiredTokens.all { token -> groundedTokens.count { it == token } == 1 },
+            ) {
+                "Generated bio grounding did not consume each required placeholder exactly once"
+            }
             val rendered = StringBuilder()
-            val groundedTokens = mutableListOf<TemplateToken>()
             segments.forEach { segment ->
                 when (segment) {
                     is TemplateSegment.Literal -> rendered.append(segment.value)
                     is TemplateSegment.Placeholder -> {
                         rendered.append(grounding.valueFor(segment.token))
-                        groundedTokens += segment.token
                     }
                 }
-            }
-
-            require(
-                groundedTokens.size == REQUIRED_TEMPLATE_TOKEN_ORDER.size &&
-                    groundedTokens.toSet() == REQUIRED_TEMPLATE_TOKEN_ORDER.toSet() &&
-                    REQUIRED_TEMPLATE_TOKEN_ORDER.all { token -> groundedTokens.count { it == token } == 1 },
-            ) {
-                "Generated bio grounding did not consume each required placeholder exactly once"
             }
             val bio = rendered.toString()
             require(bio.isWellFormedUtf16()) { "Composed bio contains malformed Unicode" }
@@ -236,20 +261,34 @@ value class GeneratedBio private constructor(val value: String) {
 internal data class BioGrounding(
     val name: String,
     val jobTitle: String,
-    val hobby: String,
+    val hobbies: List<String>,
 ) {
     internal fun valueFor(token: TemplateToken): String =
         when (token) {
-            TemplateToken.NAME -> name
-            TemplateToken.JOB -> jobTitle
-            TemplateToken.HOBBY -> hobby
+            TemplateToken.Name -> name
+            TemplateToken.Job -> jobTitle
+            is TemplateToken.Hobby -> hobbies[token.index]
         }
 }
 
-internal enum class TemplateToken(val literal: String) {
-    NAME("{{NAME}}"),
-    JOB("{{JOB}}"),
-    HOBBY("{{HOBBY}}"),
+internal sealed interface TemplateToken {
+    val literal: String
+
+    data object Name : TemplateToken {
+        override val literal: String = "{{NAME}}"
+    }
+
+    data object Job : TemplateToken {
+        override val literal: String = "{{JOB}}"
+    }
+
+    data class Hobby(val index: Int) : TemplateToken {
+        init {
+            require(index in 0 until BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS)
+        }
+
+        override val literal: String = hobbyPlaceholder(index)
+    }
 }
 
 private sealed interface TemplateSegment {
@@ -265,39 +304,48 @@ private fun parseTemplate(value: String): List<TemplateSegment> {
         if (match.range.first > cursor) {
             segments += TemplateSegment.Literal(value.substring(cursor, match.range.first))
         }
-        segments += TemplateSegment.Placeholder(TemplateToken.valueOf(match.groupValues[1]))
+        segments += TemplateSegment.Placeholder(match.toTemplateToken())
         cursor = match.range.last + 1
     }
     if (cursor < value.length) {
         segments += TemplateSegment.Literal(value.substring(cursor))
     }
-    require(
-        segments.filterIsInstance<TemplateSegment.Placeholder>().map { it.token }.toSet() ==
-            REQUIRED_TEMPLATE_TOKEN_ORDER.toSet(),
-    ) {
-        "Generated template does not contain the complete placeholder set"
-    }
     return segments
 }
 
 private fun hasUnknownOrMutatedPlaceholder(value: String): Boolean {
-    val remainder =
-        REQUIRED_TOKENS.fold(value) { current, token ->
-            current.replace(token, "")
-        }
+    val remainder = APPROVED_TOKEN.replace(value, "")
     return remainder.any { it == '{' || it == '}' }
 }
 
+private fun String.hasExactPlaceholderSet(requiredTokens: List<TemplateToken>): Boolean {
+    val observedTokens = APPROVED_TOKEN.findAll(this).map(MatchResult::toTemplateToken).toList()
+    return observedTokens.size == requiredTokens.size &&
+        observedTokens.toSet() == requiredTokens.toSet() &&
+        requiredTokens.all { token -> observedTokens.count { it == token } == 1 }
+}
+
+private fun String.hobbyPlaceholderCount(): Int =
+    APPROVED_TOKEN.findAll(this).count { match -> match.groupValues[1].startsWith("HOBBY[") }
+
+private fun MatchResult.toTemplateToken(): TemplateToken =
+    when (groupValues[1]) {
+        "NAME" -> TemplateToken.Name
+        "JOB" -> TemplateToken.Job
+        else -> TemplateToken.Hobby(requireNotNull(groupValues[2].toIntOrNull()))
+    }
+
+internal fun requiredTemplateTokens(hobbyCount: Int): List<TemplateToken> {
+    require(hobbyCount in 1..BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS)
+    return listOf(TemplateToken.Name, TemplateToken.Job) +
+        (0 until hobbyCount).map(TemplateToken::Hobby)
+}
+
 private fun hasQuotedOrMarkupWrappedPlaceholder(value: String): Boolean =
-    REQUIRED_TOKENS.any { token ->
-        val index = value.indexOf(token)
-        if (index < 0) {
-            false
-        } else {
-            val before = value.substring(0, index).trimEnd().lastOrNull()
-            val after = value.substring(index + token.length).trimStart().firstOrNull()
-            before in TOKEN_WRAPPERS || after in TOKEN_WRAPPERS
-        }
+    APPROVED_TOKEN.findAll(value).any { match ->
+        val before = value.substring(0, match.range.first).trimEnd().lastOrNull()
+        val after = value.substring(match.range.last + 1).trimStart().firstOrNull()
+        before in TOKEN_WRAPPERS || after in TOKEN_WRAPPERS
     }
 
 private fun String.hasSafeSentenceCount(): Boolean {
@@ -335,8 +383,8 @@ private fun MatchResult.isTerminalPeriod(value: String): Boolean {
 }
 
 private fun String.templateLiteralCodePointCount(): Int =
-    REQUIRED_TOKENS
-        .fold(this) { current, token -> current.replace(token, "") }
+    APPROVED_TOKEN
+        .replace(this, "")
         .let { literal -> literal.codePointCount(0, literal.length) }
 
 private fun violatesGeneratedBioContentPolicy(value: String): Boolean =
@@ -401,11 +449,8 @@ private fun isForbiddenFinalCodePoint(codePoint: Int): Boolean {
     }
 }
 
-private val REQUIRED_TEMPLATE_TOKEN_ORDER =
-    listOf(TemplateToken.NAME, TemplateToken.JOB, TemplateToken.HOBBY)
-private val REQUIRED_TOKENS = REQUIRED_TEMPLATE_TOKEN_ORDER.map(TemplateToken::literal)
-private val APPROVED_TOKEN = Regex("""\{\{(NAME|JOB|HOBBY)}}""")
-private val TEMPLATE_CHARACTERS = Regex("""[A-Za-z0-9 .,!?;:'"(){}-]+""")
+private val APPROVED_TOKEN = Regex("""\{\{(NAME|JOB|HOBBY\[(0|[1-9])])}}""")
+private val TEMPLATE_CHARACTERS = Regex("""[A-Za-z0-9 .,!?;:'"(){}\[\]-]+""")
 private val TOKEN_WRAPPERS = setOf('"', '\'', '`', '<', '>', '[', ']')
 private val SENTENCE_TERMINATORS = setOf('.', '!', '?')
 private val DISALLOWED_REGION_TERMS = listOf("North Island", "South Island")
@@ -420,9 +465,9 @@ private val PRECEDING_WORD = Regex("""([\p{L}]+(?:\.[\p{L}]+)*)$""")
 private val NON_TERMINAL_PERIOD_WORDS =
     setOf("dr", "e.g", "i.e", "jr", "mr", "mrs", "ms", "prof", "sr", "st", "vs")
 private val PRINTABLE_ASCII_CODE_POINTS = 0x20..0x7E
-private val MAX_TEMPLATE_CODE_POINTS =
+private fun maxTemplateCodePoints(requiredTokens: List<TemplateToken>): Int =
     BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS +
-        REQUIRED_TOKENS.sumOf { token -> token.codePointCount(0, token.length) }
+        requiredTokens.sumOf { token -> token.literal.codePointCount(0, token.literal.length) }
 private const val MAX_BIO_SENTENCES = 3
 private const val ZERO_WIDTH_NON_JOINER = 0x200C
 private const val ZERO_WIDTH_JOINER = 0x200D

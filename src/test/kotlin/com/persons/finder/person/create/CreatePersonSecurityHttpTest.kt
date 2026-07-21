@@ -17,6 +17,7 @@ import com.persons.finder.web.ApiExceptionHandler
 import org.hamcrest.Matchers.containsString
 import org.hamcrest.Matchers.not
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.DynamicTest
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.TestFactory
@@ -120,6 +121,39 @@ class CreatePersonSecurityHttpTest {
         assertEquals(1, fixture.generator.invocations)
         assertEquals(1, fixture.generator.networkRequests)
         assertEquals(PersistenceCounts(1, 1, 1), fixture.repository.counts())
+    }
+
+    @Test
+    fun `maximum ten-hobby person creates repeatedly with every hobby grounded once`() {
+        val hobbies = List(10) { index -> "maximum-hobby-$index" }
+
+        repeat(25) { iteration ->
+            val templateId = BioTemplateId.entries[iteration % BioTemplateId.entries.size]
+            val fixture = securityFixture(templateId)
+
+            val response =
+                fixture.mockMvc.perform(
+                    post("/persons")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(requestBody("Story engineer", hobbies)),
+                )
+                    .andExpect(status().isCreated)
+                    .andReturn()
+
+            assertEquals(10, fixture.generator.lastRequest?.hobbyCount)
+            assertEquals(PersistenceCounts(1, 1, 1), fixture.repository.counts())
+            val responseBio =
+                objectMapper.readTree(response.response.contentAsString).path("bio").asText()
+            val storedBio = fixture.repository.storedBio()
+            hobbies.forEach { hobby ->
+                assertEquals(
+                    1,
+                    responseBio.windowed(hobby.length).count { it == hobby },
+                    "$iteration/$hobby response",
+                )
+                assertEquals(1, storedBio.windowed(hobby.length).count { it == hobby })
+            }
+        }
     }
 
     @TestFactory
@@ -245,12 +279,14 @@ class CreatePersonSecurityHttpTest {
     ) : BioGenerator {
         var invocations = 0
         var networkRequests = 0
+        var lastRequest: BioTemplateRequest? = null
 
         override fun generate(request: BioTemplateRequest): BioGenerationResult {
             invocations++
             networkRequests++
+            lastRequest = request
             return BioGenerationResult.Template(
-                GeneratedBioTemplate.fromCatalog(templateId),
+                GeneratedBioTemplate.fromCatalog(templateId, request.hobbyCount),
             )
         }
     }
@@ -273,5 +309,7 @@ class CreatePersonSecurityHttpTest {
         }
 
         fun counts() = PersistenceCounts(people.size, observations.size, projections.size)
+
+        fun storedBio(): String = people.single().bio.value
     }
 }

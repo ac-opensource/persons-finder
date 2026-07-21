@@ -9,13 +9,8 @@ import tools.jackson.databind.JsonNode
 import tools.jackson.databind.ObjectMapper
 import tools.jackson.databind.node.ObjectNode
 
-internal const val OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN =
-    """^([^{}]*\{\{NAME\}\}[^{}]*\{\{JOB\}\}[^{}]*\{\{HOBBY\}\}[^{}]*|""" +
-        """[^{}]*\{\{NAME\}\}[^{}]*\{\{HOBBY\}\}[^{}]*\{\{JOB\}\}[^{}]*|""" +
-        """[^{}]*\{\{JOB\}\}[^{}]*\{\{NAME\}\}[^{}]*\{\{HOBBY\}\}[^{}]*|""" +
-        """[^{}]*\{\{JOB\}\}[^{}]*\{\{HOBBY\}\}[^{}]*\{\{NAME\}\}[^{}]*|""" +
-        """[^{}]*\{\{HOBBY\}\}[^{}]*\{\{NAME\}\}[^{}]*\{\{JOB\}\}[^{}]*|""" +
-        """[^{}]*\{\{HOBBY\}\}[^{}]*\{\{JOB\}\}[^{}]*\{\{NAME\}\}[^{}]*)$"""
+internal const val OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN =
+    """^(?:[^{}]|\{\{(?:NAME|JOB|HOBBY\[(?:0|[1-9])\])}})+$"""
 
 internal class OpenAiModelProviderClient(
     private val apiKey: String,
@@ -94,7 +89,7 @@ internal class OpenAiModelProviderClient(
                 )
         bioTemplateSchema.put(
             "pattern",
-            OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+            OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN,
         )
         return schema
     }

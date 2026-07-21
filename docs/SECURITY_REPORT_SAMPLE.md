@@ -83,10 +83,11 @@ aliases map input to closed `SafeJobCode` and `SafeInterestCode` values.
 Unmatched or sensitive values degrade to `other`.
 
 The remote result is one model-authored `bio_template` string. The application
-validates exactly one each of `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`, one to
-three safe sentences, printable ASCII, and the 512-code-point literal budget,
-then parses literal/token segments and inserts validated source strings once as
-opaque local data. They cannot enter the provider request and are never
+validates exactly one each of `{{NAME}}`, `{{JOB}}`, and every contiguous
+indexed hobby slot such as `{{HOBBY[0]}}` and `{{HOBBY[1]}}`, one to three safe
+sentences, printable ASCII, and the 512-code-point literal budget, then parses
+literal/token segments and inserts validated source strings once as opaque
+local data. Hobby values cannot enter the provider request and are never
 rescanned after insertion.
 
 Evidence:
@@ -177,7 +178,7 @@ report does not claim that control is implemented.
 | Oversized provider response | Subscription cancelled and failure normalized | HTTP transport and provider-client tests |
 | Missing, duplicate, mutated, escaped, wrapped, or unknown placeholder | `BIO_GENERATION_INVALID`; no writes | Application template and transaction tests |
 | Placeholder-looking, sentence-punctuated, or regex-significant source | Inserted once as opaque data; exact grounding and the final bound are checked without reparsing source punctuation | Trusted-composer tests |
-| Any validated prose/job/interest combination | A one-to-three-sentence model-authored template and a grounded bio of at most 732 Unicode code points | Prose-property, mapping, composer, and bounds tests |
+| Any validated prose/job/interest combination | A one-to-three-sentence model-authored template and a grounded bio containing every canonical hobby at no more than 1,272 Unicode code points | Prose-property, mapping, composer, and bounds tests |
 | Bio policy, provider, parsing, or rendering failure | No person, observation, or projection write | Application and real PostGIS tests |
 
 ## Residual risks and next actions

@@ -12,12 +12,16 @@ exact-string assertions and does not grade subjective tone, creativity, or
 relevance.
 
 The calibrated ceiling is 256 provider output tokens. The application
-independently accepts at most 512 model-authored code points and 732 final
-grounded code points. Across all reviewed paid evidence, the observed maxima
+independently accepts at most 512 model-authored code points and 1,272 final
+grounded code points so the trusted local composer can include every canonical
+hobby. Across all reviewed paid evidence, the observed maxima
 were 70 output tokens, 222 authored code points, 442 final grounded code points,
 and two sentences. The selected provider and authored limits therefore retain
-more than 3.6x and 2.3x the corresponding observed maxima. The final limit also
-reserves the existing 220-code-point maximum for locally grounded source values.
+more than 3.6x and 2.3x the corresponding observed maxima. The final limit
+reserves 760 code points for the validated name, job title, and up to ten
+hobbies. Paid runs below predate indexed hobby placeholders. They are historical
+provider reliability evidence only and do not verify the current indexed
+request/template contract or its local maximum.
 
 The normal `test`, `check`, and `build` tasks remain credential-free and make no
 provider calls. `liveAiEval` is a separate, explicitly invoked, potentially
@@ -94,7 +98,7 @@ GEMINI_API_KEY="$(<.secrets/gemini-api-key)" \
 ./gradlew --no-daemon liveAiSmoke
 ```
 
-For a three-call OpenAI compatibility smoke:
+For a five-call OpenAI compatibility smoke:
 
 ```bash
 LIVE_AI_PROVIDER=openai \
@@ -169,7 +173,7 @@ billing, missing-model, or invalid-request response also stops before spending
 the remaining planned calls. Ordinary nondeterministic outcomes—including a
 200-level incomplete response, refusal, invalid structured output, timeout,
 rate limit, I/O failure, or server error—remain recorded attempts; the
-three-call smoke collects all three before failing once.
+five-call smoke collects all five before failing once.
 
 The aggregate evaluator atomically overwrites the same ignored durable report
 after every completed paid attempt. Each checkpoint is explicitly marked
@@ -184,14 +188,14 @@ starts immediately, provider latency counts toward the interval, and the runner
 waits only for any remaining interval before the next attempt. The illustrated
 Gemini plan uses `6000`, which limits attempt starts to at most ten per
 minute. Verify the selected project's current RPM, TPM, daily quota, and usage
-before the separate three-call smoke. If the active quota requires slower
+before the separate five-call smoke. If the active quota requires slower
 pacing, precommit a larger interval and rerun plan mode; never change it during
 an evidence run. Zero is an explicit unpaced configuration, not a missing
 control; it is the approved value for the fixed paid OpenAI reliability
 protocol. Any resulting rate-limit outcome still counts as a failure and is
 never retried.
 
-The three-call live adapter smoke is compatibility and request-boundary
+The five-call live adapter smoke is compatibility and request-boundary
 preflight. It is not pooled into the 300 aggregate attempts. Let the applicable
 quota window clear between smoke and aggregate runs.
 
@@ -246,9 +250,9 @@ execution/evidence extension, it contains:
 - provider, exact model ID, clean Git revision, corpus version and hash;
 - derived prompt and output-schema hashes;
 - the application-owned maximum output-token setting;
-- the 512 model-authored, 220 maximum-source, and 732 final-grounded
+- the 512 model-authored, 760 maximum-source, and 1,272 final-grounded
   code-point limits;
-- the explicit `maximum_approved_source_lengths_v1` grounding strategy;
+- the explicit `indexed_hobbies_source_bound_v3` grounding strategy;
 - pacing strategy and configured minimum call interval in provenance;
 - configured minimum first-to-last attempt-start span in provenance;
 - pacing wait-event count and actual wait nanoseconds in a top-level `pacing`

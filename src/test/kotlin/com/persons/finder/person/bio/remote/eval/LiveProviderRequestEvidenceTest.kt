@@ -4,7 +4,7 @@ import com.persons.finder.person.bio.BioGenerationResult
 import com.persons.finder.person.bio.remote.ModelGenerationRequest
 import com.persons.finder.person.bio.remote.ModelProviderClient
 import com.persons.finder.person.bio.remote.ModelProviderResult
-import com.persons.finder.person.bio.remote.OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN
+import com.persons.finder.person.bio.remote.OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN
 import com.persons.finder.person.bio.remote.ProviderHttpRequest
 import com.persons.finder.person.bio.remote.ProviderHttpResponse
 import com.persons.finder.person.bio.remote.ProviderHttpTransport
@@ -75,7 +75,7 @@ class LiveProviderRequestEvidenceTest {
             assertFalse(rendered.contains(applicationRequest.instructions))
             assertFalse(rendered.contains(applicationRequest.inputJson))
             assertFalse(rendered.contains(applicationRequest.outputSchemaJson))
-            assertFalse(rendered.contains(OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN))
+            assertFalse(rendered.contains(OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN))
         }
     }
 
@@ -155,7 +155,7 @@ class LiveProviderRequestEvidenceTest {
             valid.copyBody(
                 valid.body.replace(
                     objectMapper.writeValueAsString(
-                        OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+                        OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN,
                     ).drop(1).dropLast(1),
                     "changed-pattern",
                 ),
@@ -221,7 +221,7 @@ class LiveProviderRequestEvidenceTest {
                     ModelProviderClient { request ->
                         captured = request
                         ModelProviderResult.Generated(
-                            """{"bio_template":"{{NAME}} enjoys {{HOBBY}} as a {{JOB}}."}""",
+                            """{"bio_template":"{{NAME}} enjoys {{HOBBY[0]}} as a {{JOB}}."}""",
                         )
                     },
                 objectMapper = objectMapper,

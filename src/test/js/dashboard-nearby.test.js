@@ -84,7 +84,7 @@ test("nearby person normalization retains map coordinates", () => {
 });
 
 test("nearby person normalization retains a full contract-sized bio", () => {
-    const bio = "A".repeat(732);
+    const bio = "A".repeat(1272);
     const normalized = normalizeNearbyPerson({ ...nearbyPerson, bio });
 
     assert.equal(normalized.bio, bio);

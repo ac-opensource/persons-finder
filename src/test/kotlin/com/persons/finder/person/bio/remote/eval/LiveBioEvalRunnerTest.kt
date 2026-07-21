@@ -50,11 +50,11 @@ class LiveBioEvalRunnerTest {
         assertEquals(24, report.provenance.plannedCalls)
         assertEquals(1_024, report.provenance.maxOutputTokens)
         assertEquals(512, report.provenance.modelAuthoredCodePointLimit)
-        assertEquals(220, report.provenance.maximumGroundingSourceCodePoints)
-        assertEquals(732, report.provenance.finalGroundedCodePointLimit)
+        assertEquals(760, report.provenance.maximumGroundingSourceCodePoints)
+        assertEquals(1_272, report.provenance.finalGroundedCodePointLimit)
         assertEquals(15_000L, report.provenance.generationDeadlineMillis)
         assertEquals(
-            "maximum_approved_source_lengths_v1",
+            "indexed_hobbies_source_bound_v3",
             report.provenance.groundingStrategy,
         )
         assertEquals("minimum_attempt_start_interval_v1", report.provenance.pacingStrategy)
@@ -195,11 +195,11 @@ class LiveBioEvalRunnerTest {
         assertEquals(6_000L, sanitizedProvenance["minimum_call_interval_millis"])
         assertEquals(1_024, sanitizedProvenance["max_output_tokens"])
         assertEquals(512, sanitizedProvenance["model_authored_code_point_limit"])
-        assertEquals(220, sanitizedProvenance["maximum_grounding_source_code_points"])
-        assertEquals(732, sanitizedProvenance["final_grounded_code_point_limit"])
+        assertEquals(760, sanitizedProvenance["maximum_grounding_source_code_points"])
+        assertEquals(1_272, sanitizedProvenance["final_grounded_code_point_limit"])
         assertEquals(15_000L, sanitizedProvenance["generation_deadline_millis"])
         assertEquals(
-            "maximum_approved_source_lengths_v1",
+            "indexed_hobbies_source_bound_v3",
             sanitizedProvenance["grounding_strategy"],
         )
         assertEquals(
@@ -550,10 +550,10 @@ class LiveBioEvalRunnerTest {
             )
         assertEquals(24, plan.plannedCalls)
         assertEquals(512, plan.modelAuthoredCodePointLimit)
-        assertEquals(220, plan.maximumGroundingSourceCodePoints)
-        assertEquals(732, plan.finalGroundedCodePointLimit)
+        assertEquals(760, plan.maximumGroundingSourceCodePoints)
+        assertEquals(1_272, plan.finalGroundedCodePointLimit)
         assertEquals(15_000L, plan.generationDeadlineMillis)
-        assertEquals("maximum_approved_source_lengths_v1", plan.groundingStrategy)
+        assertEquals("indexed_hobbies_source_bound_v3", plan.groundingStrategy)
         assertEquals("minimum_attempt_start_interval_v1", plan.pacingStrategy)
         assertEquals(6_000L, plan.minimumCallIntervalMillis)
         assertEquals(138_000L, plan.configuredMinimumCallStartSpanMillis)
@@ -701,7 +701,7 @@ class LiveBioEvalRunnerTest {
         when (
             val result =
                 GeneratedBioTemplate.validate(
-                    "{{NAME}} makes {{HOBBY}} quirky $label as a {{JOB}}.",
+                    "{{NAME}} makes {{HOBBY[0]}} quirky $label as a {{JOB}}.",
                 )
         ) {
             is BioGenerationResult.Template -> result.value

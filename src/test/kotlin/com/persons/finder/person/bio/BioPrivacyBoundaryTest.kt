@@ -52,6 +52,7 @@ class BioPrivacyBoundaryTest {
                 "jobCategory",
                 "jobCategoryMappingVersion",
                 "interests",
+                "hobbyCount",
                 "interestCategoryMappingVersion",
                 "macroRegion",
                 "tone",
@@ -59,7 +60,7 @@ class BioPrivacyBoundaryTest {
             BioTemplateRequest::class.memberProperties.map { it.name }.toSet(),
         )
         assertEquals(
-            setOf("request", "selectedHobby"),
+            setOf("request"),
             PreparedBioRequest::class.memberProperties.map { it.name }.toSet(),
         )
         assertEquals("{{NAME}}", request.displayName)
@@ -70,10 +71,9 @@ class BioPrivacyBoundaryTest {
             listOf(SafeInterestCode.OUTDOORS_NATURE, SafeInterestCode.OTHER),
             request.interests,
         )
+        assertEquals(profile.hobbies.size, request.hobbyCount)
         assertEquals(null, request.macroRegion)
         assertEquals(BioTone.QUIRKY, request.tone)
-        assertEquals("hiking", prepared.selectedHobby)
-
         val representable = request.toString()
         listOf(
             profile.name,
@@ -145,6 +145,20 @@ class BioPrivacyBoundaryTest {
                     jobCategory = SafeJobCode.OTHER,
                     jobCategoryMappingVersion = "job-v2",
                     interests = listOf(SafeInterestCode.OTHER),
+                )
+            },
+            {
+                BioTemplateRequest(
+                    jobCategory = SafeJobCode.OTHER,
+                    interests = listOf(SafeInterestCode.OTHER),
+                    hobbyCount = 0,
+                )
+            },
+            {
+                BioTemplateRequest(
+                    jobCategory = SafeJobCode.OTHER,
+                    interests = listOf(SafeInterestCode.OTHER),
+                    hobbyCount = BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS + 1,
                 )
             },
         ).forEach { invalid ->
@@ -227,7 +241,7 @@ class BioPrivacyBoundaryTest {
         }
 
     @TestFactory
-    fun `every reviewed hobby alias maps exactly and is eligible for grounding`(): List<DynamicTest> =
+    fun `every reviewed hobby alias maps exactly while all originals remain local`(): List<DynamicTest> =
         INTEREST_ALIASES.map { (alias, expected) ->
             DynamicTest.dynamicTest(alias) {
                 val exact =
@@ -235,7 +249,7 @@ class BioPrivacyBoundaryTest {
                         PersonProfile.create("Synthetic", "Unmapped role", listOf("unknown", alias)),
                     )
                 assertEquals(listOf(SafeInterestCode.OTHER, expected), exact.request.interests)
-                assertEquals(alias, exact.selectedHobby)
+                assertFalse(exact.request.toString().contains(alias))
                 assertEquals(
                     listOf(SafeInterestCode.OTHER),
                     policy.prepare(
@@ -329,7 +343,7 @@ class BioPrivacyBoundaryTest {
                 repository,
                 BioGenerator {
                     GeneratedBioTemplate.validate(
-                        "{{NAME}}{{JOB}}{{HOBBY}}" +
+                        "{{NAME}}{{JOB}}{{HOBBY[0]}}" +
                             "x".repeat(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS) +
                             ".",
                     )
@@ -380,17 +394,19 @@ class BioPrivacyBoundaryTest {
             initialLocation = GeoPoint.from(-41.2865, 174.7762),
         )
 
-    private class CapturingGenerator(
-        private val template: GeneratedBioTemplate =
-            GeneratedBioTemplate.fromCatalog(BioTemplateId.QUIRKY_SIDE_QUEST),
-    ) : BioGenerator {
+    private class CapturingGenerator : BioGenerator {
         val requests = mutableListOf<BioTemplateRequest>()
         var invocations = 0
 
         override fun generate(request: BioTemplateRequest): BioGenerationResult {
             invocations++
             requests += request
-            return BioGenerationResult.Template(template)
+            return BioGenerationResult.Template(
+                GeneratedBioTemplate.fromCatalog(
+                    BioTemplateId.QUIRKY_SIDE_QUEST,
+                    request.hobbyCount,
+                ),
+            )
         }
     }
 

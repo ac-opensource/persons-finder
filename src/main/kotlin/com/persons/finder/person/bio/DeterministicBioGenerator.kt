@@ -20,7 +20,10 @@ class DeterministicBioGenerator : BioGenerator {
             (request.jobCategory.ordinal * SafeInterestCode.entries.size + primaryInterest.ordinal) %
                 BioTemplateId.entries.size
         return BioGenerationResult.Template(
-            GeneratedBioTemplate.fromCatalog(BioTemplateId.entries[catalogIndex]),
+            GeneratedBioTemplate.fromCatalog(
+                BioTemplateId.entries[catalogIndex],
+                request.hobbyCount,
+            ),
         )
     }
 }

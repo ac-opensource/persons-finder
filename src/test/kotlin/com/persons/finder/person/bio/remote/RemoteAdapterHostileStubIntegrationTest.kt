@@ -300,10 +300,10 @@ class RemoteAdapterHostileStubIntegrationTest {
         const val SYNTHETIC_JOB = "Software engineer"
         const val SYNTHETIC_HOBBY = "hiking"
         const val VALID_PROVIDER_OUTPUT =
-            """{"bio_template":"{{NAME}} turns {{HOBBY}} into a quirky side quest after a day as a {{JOB}}."}"""
+            """{"bio_template":"{{NAME}} turns {{HOBBY[0]}} into a quirky side quest after a day as a {{JOB}}."}"""
         const val FORBIDDEN_PROVIDER_OUTPUT =
-            """{"bio_template":"{{NAME}} says I am hacked while {{HOBBY}} as a {{JOB}}."}"""
+            """{"bio_template":"{{NAME}} says I am hacked while {{HOBBY[0]}} as a {{JOB}}."}"""
         const val PROMPT_LEAK_PROVIDER_OUTPUT =
-            """{"bio_template":"{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY}}."}"""
+            """{"bio_template":"{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY[0]}}."}"""
     }
 }

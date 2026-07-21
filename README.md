@@ -268,7 +268,7 @@ PERSON_ID="$(
   curl --fail-with-body --silent --show-error \
     --request POST http://127.0.0.1:8080/persons \
     --header 'Content-Type: application/json' \
-    --data '{"name":"Ada","jobTitle":"Software engineer","hobbies":["hiking"],"location":{"latitude":-41.2865,"longitude":174.7762}}' |
+    --data '{"name":"Ada","jobTitle":"Software engineer","hobbies":["hiking","pottery"],"location":{"latitude":-41.2865,"longitude":174.7762}}' |
     jq -r '.id'
 )"
 
@@ -559,13 +559,18 @@ interest codes plus fixed deployment context; raw names, jobs, hobbies,
 coordinates, IDs, and credentials cannot enter its typed request. Provider
 clients own authentication and wire formats.
 
-Remote output must be one strict structured `bio_template`. The application
-validates placeholders, prose shape, policy, and bounds before inserting raw
-profile values locally in one parsed pass. Invalid startup configuration fails
-clearly, runtime failures are normalized, and there is no silent provider or
-deterministic fallback. The final API bio contract is at most 732 Unicode code
-points: up to 512 model-authored literal code points plus at most 220 code
-points from the selected validated name, job title, and grounding hobby. The
+Remote output must be one strict structured `bio_template`. The provider sees a
+contiguous application-owned placeholder list such as `{{HOBBY[0]}}`,
+`{{HOBBY[1]}}`, but never the hobby values. The application requires exactly
+one name slot, one job slot, and every indexed hobby slot exactly once, while
+allowing model-authored prose between the slots. It validates prose shape,
+policy, and bounds before binding each canonical hobby to its input-order index
+and inserting raw profile values locally in one parsed pass. Invalid startup
+configuration fails clearly, runtime failures are normalized, and there is no
+silent provider or deterministic fallback. The final API bio contract is at
+most 1,272 Unicode code points: up to 512 model-authored literal code points
+plus at most 760 code points from the validated name, job title, and all ten
+hobbies. The
 composer and both public response schemas enforce that same final bound. The
 complete threat model and residual risks are in
 [`SECURITY.md`](SECURITY.md).

@@ -66,6 +66,7 @@ class LiveBioSmokeReportTest {
                 promptSha256 = "c".repeat(64),
                 outputSchemaSha256 = "d".repeat(64),
                 maxOutputTokens = 1_024,
+                plannedCalls = 5,
                 startedAt = Instant.parse("2026-07-20T00:00:00Z"),
             )
         recorder.recordInvocationStart()
@@ -77,7 +78,7 @@ class LiveBioSmokeReportTest {
         )
         val validTemplate =
             validTemplate(
-                "{{NAME}} makes {{HOBBY}} delightfully odd as a {{JOB}}.",
+                "{{NAME}} makes {{HOBBY[0]}} delightfully odd as a {{JOB}}.",
             )
         recorder.record(
             BioGenerationResult.Template(validTemplate),
@@ -85,7 +86,7 @@ class LiveBioSmokeReportTest {
         recorder.recordGroundedBio(
             GeneratedBio.compose(
                 validTemplate,
-                BioGrounding(name = "N", jobTitle = "J", hobby = "H"),
+                BioGrounding(name = "N", jobTitle = "J", hobbies = listOf("H")),
             ),
         )
         recorder.recordInvocationStart()
@@ -123,7 +124,7 @@ class LiveBioSmokeReportTest {
         assertEquals(2, report["report_schema_version"])
         val provenance = report.getValue("provenance") as Map<*, *>
         assertEquals(1_024, provenance["max_output_tokens"])
-        assertEquals(3, provenance["planned_calls"])
+        assertEquals(5, provenance["planned_calls"])
         val execution = report.getValue("execution") as Map<*, *>
         assertEquals(2, execution["model_provider_client_invocations"])
         assertEquals(2, execution["provider_result_count"])
@@ -150,7 +151,7 @@ class LiveBioSmokeReportTest {
             ),
             execution["provider_request_evidence"],
         )
-        assertEquals(1, execution["not_attempted_calls"])
+        assertEquals(3, execution["not_attempted_calls"])
         assertEquals(0, execution["retries"])
         assertEquals(0, execution["top_up_calls"])
         assertEquals(

@@ -132,7 +132,7 @@ internal class LiveBioEvalRunner(
             modelAuthoredCodePointLimit =
                 BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS,
             maximumGroundingSourceCodePoints =
-                BioPolicy.MAX_SELECTED_SOURCE_CODE_POINTS,
+                BioPolicy.MAX_GROUNDED_SOURCE_CODE_POINTS,
             finalGroundedCodePointLimit = BioPolicy.FINAL_BIO_MAX_CODE_POINTS,
             groundingStrategy = MAXIMUM_SYNTHETIC_GROUNDING_STRATEGY,
             generationDeadlineMillis = configuration.generationDeadline.toMillis(),
@@ -326,7 +326,10 @@ internal class LiveBioEvalRunner(
             is BioGenerationResult.Template -> {
                 val validatedTemplate =
                     (
-                        GeneratedBioTemplate.validate(result.value.value)
+                        GeneratedBioTemplate.validate(
+                            result.value.value,
+                            MAXIMUM_SYNTHETIC_GROUNDING.hobbies.size,
+                        )
                             as? BioGenerationResult.Template
                     )?.value
                 if (validatedTemplate != result.value) {
@@ -425,7 +428,7 @@ internal class LiveBioEvalRunner(
     private companion object {
         const val PACING_STRATEGY = "minimum_attempt_start_interval_v1"
         const val MAXIMUM_SYNTHETIC_GROUNDING_STRATEGY =
-            "maximum_approved_source_lengths_v1"
+            "indexed_hobbies_source_bound_v3"
 
         val DETERMINISTIC_CATALOG_TEMPLATES: Set<GeneratedBioTemplate> =
             BioTemplateId.entries.mapTo(mutableSetOf(), GeneratedBioTemplate::fromCatalog)
@@ -433,7 +436,7 @@ internal class LiveBioEvalRunner(
             BioGrounding(
                 name = "N".repeat(PersonProfile.MAX_NAME_CODE_POINTS),
                 jobTitle = "J".repeat(PersonProfile.MAX_JOB_TITLE_CODE_POINTS),
-                hobby = "H".repeat(PersonProfile.MAX_HOBBY_CODE_POINTS),
+                hobbies = listOf("H".repeat(PersonProfile.MAX_HOBBY_CODE_POINTS)),
             )
     }
 }

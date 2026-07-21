@@ -4,7 +4,8 @@ import com.persons.finder.person.bio.BIO_GENERATION_DEADLINE
 import com.persons.finder.person.bio.BioTemplateRequest
 import com.persons.finder.person.bio.SafeInterestCode
 import com.persons.finder.person.bio.SafeJobCode
-import com.persons.finder.person.bio.remote.OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN
+import com.persons.finder.person.bio.hobbyPlaceholders
+import com.persons.finder.person.bio.remote.OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN
 import com.persons.finder.person.bio.remote.ProviderHttpRequest
 import java.nio.charset.StandardCharsets
 import tools.jackson.core.StreamReadFeature
@@ -300,7 +301,7 @@ internal class LiveProviderRequestEvidenceAccumulator(
                 ?.path("bio_template")
                 ?.get("pattern")
                 ?.takeIf(JsonNode::isString)
-                ?.stringValue() == OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN
+                ?.stringValue() == OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN
         val outputSchemaFingerprintMatched =
             schema
                 ?.takeIf(JsonNode::isObject)
@@ -854,6 +855,7 @@ internal fun hasApprovedLiveBioPayload(
             payload.approvedInterests() &&
             payload.text("interest_category_mapping_version") ==
             BioTemplateRequest.INTEREST_MAPPING_VERSION &&
+            payload.approvedHobbyPlaceholders() &&
             payload.text("tone") == "quirky"
     } catch (_: RuntimeException) {
         false
@@ -876,6 +878,22 @@ private fun JsonNode.approvedInterests(): Boolean {
         values.distinct() == values
 }
 
+private fun JsonNode.approvedHobbyPlaceholders(): Boolean {
+    val nodes =
+        get("hobby_placeholders")
+            ?.takeIf(JsonNode::isArray)
+            ?.toList()
+            ?: return false
+    if (
+        nodes.isEmpty() ||
+        nodes.size > BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS ||
+        nodes.any { node -> !node.isString }
+    ) {
+        return false
+    }
+    return nodes.map(JsonNode::stringValue) == hobbyPlaceholders(nodes.size)
+}
+
 private val APPROVED_INPUT_FIELDS =
     setOf(
         "display_name",
@@ -885,6 +903,7 @@ private val APPROVED_INPUT_FIELDS =
         "job_category_mapping_version",
         "interests",
         "interest_category_mapping_version",
+        "hobby_placeholders",
         "tone",
     )
 private val APPROVED_JOB_CODES =

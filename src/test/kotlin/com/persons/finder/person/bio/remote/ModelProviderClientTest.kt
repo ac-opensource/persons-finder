@@ -46,7 +46,7 @@ class ModelProviderClientTest {
                         "status": "completed",
                         "content": [{
                           "type": "output_text",
-                          "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
+                          "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY[0]}} a quirky spin after work as a {{JOB}}.\"}"
                         }]
                       }]
                     }
@@ -93,25 +93,29 @@ class ModelProviderClientTest {
                 .asBoolean(),
         )
         assertEquals(
-            OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+            OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN,
             body.path("text").path("format").path("schema")
                 .path("properties").path("bio_template").path("pattern").stringValue(),
         )
-        val placeholderPattern = Regex(OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN)
+        val placeholderPattern = Regex(OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN)
         listOf(
-            "{{NAME}} a {{JOB}} b {{HOBBY}}.",
-            "{{NAME}} a {{HOBBY}} b {{JOB}}.",
-            "{{JOB}} a {{NAME}} b {{HOBBY}}.",
-            "{{JOB}} a {{HOBBY}} b {{NAME}}.",
-            "{{HOBBY}} a {{NAME}} b {{JOB}}.",
-            "{{HOBBY}} a {{JOB}} b {{NAME}}.",
+            "{{NAME}} a {{JOB}} b {{HOBBY[0]}}.",
+            "{{NAME}} a {{HOBBY[0]}} b {{JOB}}.",
+            "{{JOB}} a {{NAME}} b {{HOBBY[0]}}.",
+            "{{JOB}} a {{HOBBY[0]}} b {{NAME}}.",
+            "{{HOBBY[0]}} a {{NAME}} b {{JOB}}.",
+            "{{HOBBY[0]}} a {{JOB}} b {{NAME}}.",
+            "{{NAME}} makes {{HOBBY[0]}} quirky, then {{HOBBY[1]}} even quirkier as a {{JOB}}.",
+            "{{NAME}} repeats {{HOBBY[0]}} and {{HOBBY[0]}}.",
+            "{{NAME}} gives {{HOBBY[0]}} a quirky spin.",
         ).forEach { template ->
             assertTrue(placeholderPattern.matches(template), template)
         }
         listOf(
-            "{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}, and {{NAME}} smiles.",
-            "{{NAME}} gives {{HOBBY}} a quirky spin.",
-            "{{NAME}} gives {{HOBBY}} a quirky spin as a {{JOB}} with {{UNKNOWN}}.",
+            "{{NAME}} gives {{HOBBY[0]}} a quirky spin as a {{JOB}} with {{UNKNOWN}}.",
+            "{{NAME}} gives {{HOBBY}} a quirky spin as a {{JOB}}.",
+            "{{NAME}} gives {{HOBBY[10]}} a quirky spin as a {{JOB}}.",
+            "{{NAME}} gives {{HOBBY[01]}} a quirky spin as a {{JOB}}.",
         ).forEach { template ->
             assertFalse(placeholderPattern.matches(template), template)
         }
@@ -170,7 +174,7 @@ class ModelProviderClientTest {
                       "status": "completed",
                       "content": [{
                         "type": "output_text",
-                        "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
+                        "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY[0]}} a quirky spin after work as a {{JOB}}.\"}"
                       }]
                     }
                   ]
@@ -219,7 +223,7 @@ class ModelProviderClientTest {
                         "finishReason": "STOP",
                         "content": {
                           "parts": [{
-                            "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
+                            "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY[0]}} a quirky spin after work as a {{JOB}}.\"}"
                           }]
                         }
                       }]
@@ -290,7 +294,7 @@ class ModelProviderClientTest {
                       "stop_reason": "end_turn",
                       "content": [{
                         "type": "text",
-                        "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"
+                        "text": "{\"bio_template\":\"{{NAME}} gives {{HOBBY[0]}} a quirky spin after work as a {{JOB}}.\"}"
                       }]
                     }
                     """.trimIndent(),
@@ -497,7 +501,7 @@ class ModelProviderClientTest {
             "customer context",
             "synthetic provider output",
             "{{JOB}}",
-            "{{HOBBY}}",
+            "{{HOBBY[0]}}",
         ).forEach { forbidden ->
             assertFalse(diagnostics.contains(forbidden), forbidden)
         }
@@ -542,7 +546,7 @@ class ModelProviderClientTest {
         val openAiBody = objectMapper.readTree(sentRequests[0].body)
         assertFalse(openAiBody.path("store").asBoolean())
         assertEquals(
-            OPENAI_BIO_TEMPLATE_EXACT_PLACEHOLDER_PATTERN,
+            OPENAI_BIO_TEMPLATE_PLACEHOLDER_PATTERN,
             openAiBody.path("text").path("format").path("schema")
                 .path("properties").path("bio_template").path("pattern").stringValue(),
         )
@@ -616,19 +620,19 @@ class ModelProviderClientTest {
     private fun validOpenAiResponse() =
         ProviderHttpResponse(
             200,
-            """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"}]}]}""",
+            """{"object":"response","status":"completed","output":[{"type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY[0]}} a quirky spin after work as a {{JOB}}.\"}"}]}]}""",
         )
 
     private fun validGeminiResponse() =
         ProviderHttpResponse(
             200,
-            """{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"}]}}]}""",
+            """{"candidates":[{"finishReason":"STOP","content":{"parts":[{"text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY[0]}} a quirky spin after work as a {{JOB}}.\"}"}]}}]}""",
         )
 
     private fun validAnthropicResponse() =
         ProviderHttpResponse(
             200,
-            """{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}.\"}"}]}""",
+            """{"type":"message","role":"assistant","stop_reason":"end_turn","content":[{"type":"text","text":"{\"bio_template\":\"{{NAME}} gives {{HOBBY[0]}} a quirky spin after work as a {{JOB}}.\"}"}]}""",
         )
 
     private fun openAiClient(transport: ProviderHttpTransport) =
@@ -669,7 +673,7 @@ class ModelProviderClientTest {
 
     private companion object {
         const val VALID_PROSE_OUTPUT =
-            """{"bio_template":"{{NAME}} gives {{HOBBY}} a quirky spin after work as a {{JOB}}."}"""
+            """{"bio_template":"{{NAME}} gives {{HOBBY[0]}} a quirky spin after work as a {{JOB}}."}"""
     }
 
     private class RecordingTransport(

@@ -82,7 +82,8 @@ class CreatePersonControllerContractTest {
             .andExpect(
                 jsonPath("$.bio")
                     .value(
-                        "Meet Andrew, a very quirky Software engineer who enjoys tramping.",
+                        "Meet Andrew, a very quirky Software engineer: " +
+                            "tramping opens the side quest; pottery adds the plot twist.",
                     ),
             )
             .andExpect(jsonPath("$.createdAt").value("2026-07-19T05:06:07.123Z"))
@@ -298,9 +299,11 @@ class CreatePersonControllerContractTest {
                     profile = profile,
                     bio =
                         BioPolicy().compose(
-                            GeneratedBioTemplate.fromCatalog(BioTemplateId.QUIRKY_SIDE_QUEST),
+                            GeneratedBioTemplate.fromCatalog(
+                                BioTemplateId.QUIRKY_SIDE_QUEST,
+                                profile.hobbies.size,
+                            ),
                             profile,
-                            BioPolicy().prepare(profile).selectedHobby,
                         ),
                     createdAt = Instant.parse("2026-07-19T05:06:07.123Z"),
                     lastKnownLocationAt = Instant.parse("2026-07-19T05:06:07.123Z"),

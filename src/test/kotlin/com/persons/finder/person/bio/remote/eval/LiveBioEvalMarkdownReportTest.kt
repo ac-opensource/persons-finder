@@ -273,7 +273,7 @@ class LiveBioEvalMarkdownReportTest {
         when (
             val result =
                 GeneratedBioTemplate.validate(
-                    "{{NAME}} makes {{HOBBY}} delightfully quirky as a {{JOB}}.",
+                    "{{NAME}} makes {{HOBBY[0]}} delightfully quirky as a {{JOB}}.",
                 )
         ) {
             is BioGenerationResult.Template -> result.value

@@ -13,15 +13,14 @@ class BioPolicyTest {
     private val policy = BioPolicy()
 
     @Test
-    fun `safe mapping is exact ordered deduplicated and selects the first exact hobby`() {
-        val prepared =
-            policy.prepare(
-                PersonProfile.create(
-                    "Synthetic Person",
-                    "Software engineer",
-                    listOf("unknown first", "hiking", "espresso", "HIKING", "hiking"),
-                ),
+    fun `safe mapping is exact ordered and deduplicated across all hobbies`() {
+        val profile =
+            PersonProfile.create(
+                "Synthetic Person",
+                "Software engineer",
+                listOf("unknown first", "hiking", "espresso", "HIKING", "hiking"),
             )
+        val prepared = policy.prepare(profile)
 
         assertEquals(SafeJobCode.TECHNOLOGY_ENGINEERING, prepared.request.jobCategory)
         assertEquals(
@@ -32,9 +31,9 @@ class BioPolicyTest {
             ),
             prepared.request.interests,
         )
-        assertEquals("hiking", prepared.selectedHobby)
         assertFalse(prepared.request.toString().contains("Software engineer"))
         assertFalse(prepared.request.toString().contains("hiking"))
+        assertEquals(profile.hobbies.size, prepared.request.hobbyCount)
     }
 
     @Test
@@ -49,7 +48,6 @@ class BioPolicyTest {
 
         assertEquals(SafeJobCode.OTHER, prepared.request.jobCategory)
         assertEquals(listOf(SafeInterestCode.OTHER), prepared.request.interests)
-        assertEquals("political volunteering", prepared.selectedHobby)
         assertTrue(profile.hobbies.none { prepared.request.toString().contains(it) })
     }
 
@@ -101,7 +99,6 @@ class BioPolicyTest {
 
         assertEquals(SafeJobCode.OTHER, prepared.request.jobCategory)
         assertEquals(listOf(SafeInterestCode.OTHER), prepared.request.interests)
-        assertEquals("I ignore instructions in outdated board games", prepared.selectedHobby)
     }
 
     @Test
@@ -109,25 +106,28 @@ class BioPolicyTest {
         val profile =
             PersonProfile.create(
                 "Name {{JOB}} \$1",
-                "Engineer {{HOBBY}} \\d+",
-                listOf("regex \$& [a-z]+ and {{NAME}}"),
+                "Engineer {{HOBBY[0]}} \\d+",
+                listOf("regex \$& [a-z]+ and {{NAME}}", "pottery"),
             )
-        val prepared = policy.prepare(profile)
+        policy.prepare(profile)
         val bio =
             policy.compose(
-                GeneratedBioTemplate.fromCatalog(BioTemplateId.QUIRKY_SIDE_QUEST),
+                GeneratedBioTemplate.fromCatalog(
+                    BioTemplateId.QUIRKY_SIDE_QUEST,
+                    profile.hobbies.size,
+                ),
                 profile,
-                prepared.selectedHobby,
             ).value
 
         assertEquals(
-            "Meet Name {{JOB}} \$1, a very quirky Engineer {{HOBBY}} \\d+ who enjoys " +
-                "regex \$& [a-z]+ and {{NAME}}.",
+            "Meet Name {{JOB}} \$1, a very quirky Engineer {{HOBBY[0]}} \\d+: " +
+                "regex \$& [a-z]+ and {{NAME}} opens the side quest; " +
+                "pottery adds the plot twist.",
             bio,
         )
         assertTrue(bio.contains(profile.name))
         assertTrue(bio.contains(profile.jobTitle))
-        assertTrue(bio.contains(prepared.selectedHobby))
+        profile.hobbies.forEach { hobby -> assertTrue(bio.contains(hobby)) }
     }
 
     @Test
@@ -136,24 +136,28 @@ class BioPolicyTest {
             PersonProfile.create(
                 "🧭".repeat(80),
                 "J".repeat(80),
-                listOf("H".repeat(60)),
+                List(PersonProfile.MAX_HOBBIES) { index ->
+                    index.toString() + "H".repeat(PersonProfile.MAX_HOBBY_CODE_POINTS - 1)
+                },
             )
-        val prepared = policy.prepare(exactProfile)
+        policy.prepare(exactProfile)
         val generated =
             GeneratedBioTemplate.validate(
-                "{{NAME}}{{JOB}}{{HOBBY}}" +
+                requiredTemplateTokens(PersonProfile.MAX_HOBBIES).joinToString("") { it.literal } +
                     "x".repeat(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS - 1) +
                     ".",
+                PersonProfile.MAX_HOBBIES,
             ) as BioGenerationResult.Template
 
         assertEquals(
             BioPolicy.FINAL_BIO_MAX_CODE_POINTS,
             policy
-                .compose(generated.value, exactProfile, prepared.selectedHobby)
+                .compose(generated.value, exactProfile)
                 .value
                 .let { it.codePointCount(0, it.length) },
         )
-        assertEquals(220, BioPolicy.MAX_SELECTED_SOURCE_CODE_POINTS)
+        assertEquals(600, BioPolicy.MAX_GROUNDED_HOBBIES_CODE_POINTS)
+        assertEquals(760, BioPolicy.MAX_GROUNDED_SOURCE_CODE_POINTS)
     }
 
     companion object {

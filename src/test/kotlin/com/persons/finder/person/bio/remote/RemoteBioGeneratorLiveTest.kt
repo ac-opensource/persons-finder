@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import java.net.URI
 import java.time.Duration
 import tools.jackson.databind.json.JsonMapper
 
@@ -79,6 +80,36 @@ class RemoteBioGeneratorLiveTest {
         runLiveEvaluationWithEvidence(
             provider = LiveBioEvalProvider.ANTHROPIC,
             prerequisites = prerequisites,
+        )
+    }
+
+    @Test
+    fun `privacy assertion distinguishes raw values from broader allowlisted codes`() {
+        val profile =
+            PersonProfile.create(
+                name = "Synthetic Reader",
+                jobTitle = "writer",
+                hobbies = listOf("reading"),
+            )
+        val applicationInput =
+            objectMapper.writeValueAsString(
+                mapOf(
+                    "display_name" to "{{NAME}}",
+                    "locale" to "en-NZ",
+                    "country_code" to "NZ",
+                    "job_category" to "creative_media",
+                    "interests" to listOf("reading_writing"),
+                ),
+            )
+
+        assertSourceValuesAbsent(
+            ProviderHttpRequest(
+                uri = URI.create("https://api.example.test/v1/generate"),
+                headers = mapOf("Content-Type" to "application/json"),
+                body = objectMapper.writeValueAsString(mapOf("input" to applicationInput)),
+                timeout = Duration.ofSeconds(1),
+            ),
+            profile,
         )
     }
 
@@ -149,11 +180,12 @@ class RemoteBioGeneratorLiveTest {
                 provider = provider.wireValue,
                 exactModelId = prerequisites.model,
                 codeRevision = revision.commit,
-                fixtureId = "live-bio-smoke-v2",
+                fixtureId = "live-bio-smoke-v3-five-indexed-hobby-cases",
                 fixtureSha256 = fixtureSha256,
                 promptSha256 = fingerprint.promptSha256,
                 outputSchemaSha256 = fingerprint.outputSchemaSha256,
                 maxOutputTokens = fingerprint.maxOutputTokens,
+                plannedCalls = cases.size,
             )
         recorder.preflightEvidenceDestinations()
         val callController = LiveBioSmokeCallController()
@@ -204,17 +236,21 @@ class RemoteBioGeneratorLiveTest {
                     assertSourceValuesAbsent(captured, testCase.profile)
 
                     if (result is BioGenerationResult.Template) {
-                        GeneratedBioTemplate.validate(result.value.value)
+                        GeneratedBioTemplate.validate(
+                            result.value.value,
+                            testCase.profile.hobbies.size,
+                        )
                         val finalBio =
                             policy.compose(
                                 result.value,
                                 testCase.profile,
-                                prepared.selectedHobby,
                             )
                         recorder.recordGroundedBio(finalBio)
                         assertTrue(finalBio.value.contains(testCase.profile.name))
                         assertTrue(finalBio.value.contains(testCase.profile.jobTitle))
-                        assertTrue(finalBio.value.contains(prepared.selectedHobby))
+                        testCase.profile.hobbies.forEach { hobby ->
+                            assertTrue(finalBio.value.contains(hobby))
+                        }
                     }
                 }
                 if (
@@ -345,6 +381,55 @@ class RemoteBioGeneratorLiveTest {
                 expectedJob = SafeJobCode.OTHER,
                 expectedInterests = listOf(SafeInterestCode.OTHER),
             ),
+            ExpectedLiveCase(
+                caseId = "three_indexed_hobbies",
+                profile =
+                    PersonProfile.create(
+                        name = "Synthetic Delta",
+                        jobTitle = "teacher",
+                        hobbies = listOf("pottery", "chess", "guitar"),
+                    ),
+                expectedJob = SafeJobCode.EDUCATION_RESEARCH,
+                expectedInterests =
+                    listOf(
+                        SafeInterestCode.ARTS_CRAFTS,
+                        SafeInterestCode.GAMES_PUZZLES,
+                        SafeInterestCode.MUSIC,
+                    ),
+            ),
+            ExpectedLiveCase(
+                caseId = "maximum_ten_indexed_hobbies",
+                profile =
+                    PersonProfile.create(
+                        name = "Synthetic Epsilon",
+                        jobTitle = "chef",
+                        hobbies =
+                            listOf(
+                                "running",
+                                "cycling",
+                                "cooking",
+                                "hiking",
+                                "espresso",
+                                "pottery",
+                                "guitar",
+                                "reading",
+                                "coding",
+                                "weekend travel",
+                            ),
+                    ),
+                expectedJob = SafeJobCode.HOSPITALITY_RETAIL,
+                expectedInterests =
+                    listOf(
+                        SafeInterestCode.SPORTS_FITNESS,
+                        SafeInterestCode.FOOD_DRINK,
+                        SafeInterestCode.OUTDOORS_NATURE,
+                        SafeInterestCode.ARTS_CRAFTS,
+                        SafeInterestCode.MUSIC,
+                        SafeInterestCode.READING_WRITING,
+                        SafeInterestCode.TECHNOLOGY_MAKING,
+                        SafeInterestCode.OTHER,
+                    ),
+            ),
         )
 
     private fun assertApplicationOwnedRequest(
@@ -397,8 +482,12 @@ class RemoteBioGeneratorLiveTest {
             }
         (listOf(profile.name, profile.jobTitle) + profile.hobbies)
             .forEachIndexed { index, source ->
+                val directJsonString = objectMapper.writeValueAsString(source)
+                val embeddedJsonString =
+                    objectMapper.writeValueAsString(directJsonString).removeSurrounding("\"")
                 assertFalse(
-                    completeRequest.contains(source),
+                    completeRequest.contains(directJsonString) ||
+                        completeRequest.contains(embeddedJsonString),
                     "Source profile field $index crossed the provider boundary",
                 )
             }

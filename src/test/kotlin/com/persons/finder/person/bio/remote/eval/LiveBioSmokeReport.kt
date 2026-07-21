@@ -146,6 +146,7 @@ internal class LiveBioSmokeRecorder(
     private val promptSha256: String,
     private val outputSchemaSha256: String,
     private val maxOutputTokens: Int,
+    private val plannedCalls: Int = 3,
     private val startedAt: Instant = Instant.now(),
 ) {
     private val resultCounts = linkedMapOf<BioEvalOutcome, Int>()
@@ -156,6 +157,10 @@ internal class LiveBioSmokeRecorder(
     private val validProseFingerprints = mutableSetOf<String>()
     private var invocationCount = 0
     private var harnessErrorCount = 0
+
+    init {
+        require(plannedCalls > 0) { "Live smoke planned call count must be positive" }
+    }
 
     fun preflightEvidenceDestinations(
         reportDirectory: Path =
@@ -262,7 +267,7 @@ internal class LiveBioSmokeRecorder(
                 providerAttemptCount == delegatedHttpSendAttempts &&
                 (providerRequestCount == 0 || requestConfigurationMatched)
         val allPlannedCallsCompleted =
-            invocationCount == PLANNED_CALLS &&
+            invocationCount == plannedCalls &&
                 recordedResults == invocationCount &&
                 invocationLatencyMillis.size == invocationCount &&
                 applicationDiagnosticCount == invocationCount &&
@@ -292,7 +297,7 @@ internal class LiveBioSmokeRecorder(
                     "code_revision" to codeRevision,
                     "fixture_id" to fixtureId,
                     "fixture_sha256" to fixtureSha256,
-                    "planned_calls" to PLANNED_CALLS,
+                    "planned_calls" to plannedCalls,
                     "prompt_sha256" to promptSha256,
                     "output_schema_sha256" to outputSchemaSha256,
                     "max_output_tokens" to maxOutputTokens,
@@ -309,7 +314,7 @@ internal class LiveBioSmokeRecorder(
                         (invocationCount - applicationDiagnosticCount).coerceAtLeast(0),
                     "delegated_http_send_attempts" to delegatedHttpSendAttempts,
                     "not_attempted_calls" to
-                        (PLANNED_CALLS - invocationCount).coerceAtLeast(0),
+                        (plannedCalls - invocationCount).coerceAtLeast(0),
                     "invocations_without_result" to
                         (invocationCount - recordedResults).coerceAtLeast(0),
                     "retries" to 0,
@@ -470,7 +475,6 @@ internal class LiveBioSmokeRecorder(
         }
 
     private companion object {
-        const val PLANNED_CALLS = 3
         const val NANOS_PER_MILLISECOND = 1_000_000L
     }
 }

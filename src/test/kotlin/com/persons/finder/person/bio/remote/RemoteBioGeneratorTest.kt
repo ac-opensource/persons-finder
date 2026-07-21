@@ -44,6 +44,7 @@ class RemoteBioGeneratorTest {
                 "job_category_mapping_version",
                 "interests",
                 "interest_category_mapping_version",
+                "hobby_placeholders",
                 "tone",
             ),
             payload.propertyNames().toSet(),
@@ -53,6 +54,10 @@ class RemoteBioGeneratorTest {
         assertEquals("NZ", payload.path("country_code").stringValue())
         assertEquals("technology_engineering", payload.path("job_category").stringValue())
         assertEquals(listOf("music"), payload.path("interests").toList().map { it.stringValue() })
+        assertEquals(
+            listOf("{{HOBBY[0]}}"),
+            payload.path("hobby_placeholders").toList().map { it.stringValue() },
+        )
         listOf("Andrew", "Software engineer", "music lessons", "-41.2865", "person-id")
             .forEach { forbidden -> assertFalse(providerRequest.inputJson.contains(forbidden)) }
 
@@ -65,8 +70,40 @@ class RemoteBioGeneratorTest {
         assertEquals(256, providerRequest.maxOutputTokens)
         assertTrue(providerRequest.instructions.contains("inert data"))
         assertTrue(providerRequest.instructions.contains("one to three sentences"))
-        assertTrue(providerRequest.instructions.contains("Never repeat a placeholder"))
+        assertTrue(providerRequest.instructions.contains("repeat any placeholder"))
+        assertTrue(providerRequest.instructions.contains("distinct creative beats"))
         assertTrue(providerRequest.instructions.contains("512 total characters"))
+    }
+
+    @Test
+    fun `shared adapter requires every indexed hobby slot exactly once`() {
+        val request =
+            BioTemplateRequest(
+                jobCategory = SafeJobCode.TECHNOLOGY_ENGINEERING,
+                interests = listOf(SafeInterestCode.MUSIC),
+                hobbyCount = 3,
+            )
+        val valid =
+            "{{NAME}} is a {{JOB}} who turns {{HOBBY[0]}} into an opening act, " +
+                "{{HOBBY[1]}} into a plot twist, and {{HOBBY[2]}} into an encore."
+
+        assertEquals(
+            validTemplate(valid, request.hobbyCount),
+            generatorReturning(valid).generate(request),
+        )
+        listOf(
+            valid.replace("{{HOBBY[1]}}", "missing"),
+            valid.replace("{{HOBBY[1]}}", "{{HOBBY[0]}}"),
+            valid.replace("{{HOBBY[1]}}", "{{HOBBY[3]}}"),
+            valid.replace("{{HOBBY[1]}}", "{{HOBBY}}"),
+            valid.replace("{{HOBBY[1]}}", "{{HOBBY[01]}}"),
+        ).forEach { candidate ->
+            assertEquals(
+                BioGenerationResult.Failure(BioGenerationFailure.INVALID_OUTPUT),
+                generatorReturning(candidate).generate(request),
+                candidate,
+            )
+        }
     }
 
     @Test
@@ -102,11 +139,11 @@ class RemoteBioGeneratorTest {
         }
 
         listOf(
-            "{{NAME}} reveals the system prompt while {{HOBBY}} as a {{JOB}}.",
-            "{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY}}.",
-            "{{NAME}} discusses prompts as a quirky {{JOB}} who enjoys {{HOBBY}}.",
-            "{{NAME}} follows one instruction as a quirky {{JOB}} who enjoys {{HOBBY}}.",
-            "{{NAME}} follows clear instructions as a quirky {{JOB}} who enjoys {{HOBBY}}.",
+            "{{NAME}} reveals the system prompt while {{HOBBY[0]}} as a {{JOB}}.",
+            "{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY[0]}}.",
+            "{{NAME}} discusses prompts as a quirky {{JOB}} who enjoys {{HOBBY[0]}}.",
+            "{{NAME}} follows one instruction as a quirky {{JOB}} who enjoys {{HOBBY[0]}}.",
+            "{{NAME}} follows clear instructions as a quirky {{JOB}} who enjoys {{HOBBY[0]}}.",
         ).forEach { template ->
             assertEquals(
                 BioGenerationResult.Failure(BioGenerationFailure.POLICY_REJECTED),
@@ -126,13 +163,13 @@ class RemoteBioGeneratorTest {
                 """{"template":"$FIRST_TEMPLATE"}""" to
                     RemoteBioGenerationDiagnostic.OUTPUT_JSON_FIELD_SHAPE,
                 validOutput(
-                    "{{NAME}} and {{NAME}} enjoy {{HOBBY}} as a {{JOB}}.",
+                    "{{NAME}} and {{NAME}} enjoy {{HOBBY[0]}} as a {{JOB}}.",
                 ) to RemoteBioGenerationDiagnostic.TEMPLATE_PLACEHOLDER_CARDINALITY,
                 validOutput(
-                    "{{NAME}} is a {{JOB}}. {{HOBBY}} helps! Still curious? One more.",
+                    "{{NAME}} is a {{JOB}}. {{HOBBY[0]}} helps! Still curious? One more.",
                 ) to RemoteBioGenerationDiagnostic.TEMPLATE_SENTENCE_COUNT,
                 validOutput(
-                    "{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY}}.",
+                    "{{NAME}} follows every prompt as a quirky {{JOB}} who enjoys {{HOBBY[0]}}.",
                 ) to RemoteBioGenerationDiagnostic.TEMPLATE_CONTENT_POLICY,
                 validOutput(FIRST_TEMPLATE) to
                     RemoteBioGenerationDiagnostic.VALID_TEMPLATE,
@@ -287,16 +324,19 @@ class RemoteBioGeneratorTest {
     private fun validOutput(template: String): String =
         objectMapper.writeValueAsString(mapOf("bio_template" to template))
 
-    private fun validTemplate(template: String): BioGenerationResult.Template =
-        when (val result = GeneratedBioTemplate.validate(template)) {
+    private fun validTemplate(
+        template: String,
+        hobbyCount: Int = 1,
+    ): BioGenerationResult.Template =
+        when (val result = GeneratedBioTemplate.validate(template, hobbyCount)) {
             is BioGenerationResult.Template -> result
             is BioGenerationResult.Failure -> error("Fixture must be a valid template: ${result.reason}")
         }
 
     private companion object {
         const val FIRST_TEMPLATE =
-            "{{NAME}} turns {{HOBBY}} into a quirky side quest after a day as a {{JOB}}."
+            "{{NAME}} turns {{HOBBY[0]}} into a quirky side quest after a day as a {{JOB}}."
         const val SECOND_TEMPLATE =
-            "{{NAME}} brings a delightful twist to {{HOBBY}} as a {{JOB}}."
+            "{{NAME}} brings a delightful twist to {{HOBBY[0]}} as a {{JOB}}."
     }
 }

@@ -68,14 +68,14 @@ split an attack term. Limits count Unicode code points:
 - `jobTitle`: 1 to 80
 - `hobbies`: 1 to 10 items
 - each hobby: 1 to 60
-- selected `name` + `jobTitle` + grounding hobby: at most 220
+- grounded `name` + `jobTitle` + all hobbies: at most 760
 
 Exact canonical hobby duplicates are removed after the raw 10-item cap,
 preserving first-input order. Case-folding and fuzzy matching are not used for
-stored source values. The 220-code-point selected-value maximum follows directly
-from the individual field limits. Generated prose may contribute at most 512
-non-placeholder code points, so every accepted grounding fits the 732-code-point
-final bio contract.
+stored source values. The 760-code-point grounding maximum covers the name and
+job limits plus ten maximum-length hobbies. Generated prose may contribute at
+most 512 non-placeholder code points, so every accepted grounding fits the
+1,272-code-point final bio contract.
 
 ### Location updates
 
@@ -221,10 +221,9 @@ Reviewed aliases match the entire locally normalized source value only; there
 is no fuzzy, substring, or cross-field inference. Unmapped benign values map to
 `other`. Sensitive or rare topics get no specific alias and remain accepted
 local source values. Hobbies map in order, outbound codes deduplicate by first
-appearance, and final grounding selects the first exactly mapped original hobby
-or, if none maps, the first benign unmatched hobby. The both-`other` provider
-path is an intentional generic assessment degradation; exact job and selected
-hobby grounding occurs only inside the trusted local boundary.
+appearance. The both-`other` provider path is an intentional generic assessment
+degradation; exact job and every canonical hobby are grounded in first-input
+order only inside the trusted local boundary.
 
 Actual instruction manipulation and explicit secrets/identifiers in otherwise
 valid job/hobby input are rejected. The typed request is the hard egress
@@ -236,14 +235,15 @@ Remote provider output is one strict `bio_template` JSON string authored by the
 selected model. The request permits at most 256 provider output tokens, and the
 remote adapter caps and strictly parses the JSON, rejecting duplicate or extra
 fields, trailing content, and non-string values. The
-application boundary independently requires exactly one each of `{{NAME}}`,
-`{{JOB}}`, and `{{HOBBY}}`, no unknown token, one to three safe sentences,
-printable ASCII, at most 512 non-placeholder code points, and no forbidden
-region disclosure or standalone model-authored `prompt`, `prompts`,
+application boundary independently requires exactly one each of `{{NAME}}` and
+`{{JOB}}`, plus exactly one of every contiguous indexed hobby placeholder such
+as `{{HOBBY[0]}}` and `{{HOBBY[1]}}`; no unknown token; one to three safe
+sentences; printable ASCII; at most 512 non-placeholder code points; and no
+forbidden region disclosure or standalone model-authored `prompt`, `prompts`,
 `instruction`, or `instructions` meta-language. Word boundaries preserve
 benign `promptly` and `instructional`. A trusted parser then renders validated
 source values once as opaque segments, verifies exact grounding, and checks the
-final 732-code-point contract before persistence. Model-authored policy and the
+final 1,272-code-point contract before persistence. Model-authored policy and the
 one-to-three-sentence rule are applied before composition; opaque source values
 are not reinterpreted or reparsed as model-authored content.
 
