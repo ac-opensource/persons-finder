@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 readonly BENCHMARK_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
@@ -61,6 +62,50 @@ compose() {
         --project-name "${COMPOSE_PROJECT}" \
         --profile "${COMPOSE_PROFILE}" \
         "$@"
+}
+
+compose_exec() {
+    # Compose keeps stdin attached even when its pseudo-TTY is disabled. Every
+    # exec is non-interactive so it cannot consume a caller's redirected input,
+    # including the cardinalities CSV used by measurement loops.
+    compose exec --no-TTY "$@" </dev/null
+}
+
+pgbench_exec() {
+    compose_exec database sh -c 'umask 077; exec "$@"' benchmark-pgbench pgbench "$@"
+}
+
+container_pgbench_log_dir() {
+    local output_directory="$1"
+    local label="$2"
+    local run_id category
+    run_id="$(basename "$(dirname "${output_directory}")")"
+    category="$(basename "${output_directory}")"
+    [[ "${run_id}" =~ ^run-[0-9]{8}T[0-9]{6}Z$ ]] ||
+        fail "invalid run directory for container log copy: ${run_id}"
+    [[ "${category}" =~ ^[a-z0-9-]+$ ]] ||
+        fail "invalid result category for container log copy: ${category}"
+    [[ "${label}" =~ ^[A-Za-z0-9._-]+$ ]] ||
+        fail "invalid workload label for container log copy: ${label}"
+    printf '/tmp/persons-finder-benchmark-pgbench/%s/%s/%s\n' \
+        "${run_id}" "${category}" "${label}"
+}
+
+prepare_container_pgbench_logs() {
+    local container_directory="$1"
+    compose_exec database sh -c \
+        'set -eu; umask 077; rm -rf -- "$1"; mkdir -p -- "$1"; chmod 0700 "$1"' \
+        benchmark-pgbench-logs "${container_directory}"
+}
+
+copy_container_pgbench_logs() {
+    local container_directory="$1"
+    local output_directory="$2"
+    local container_id
+    container_id="$(database_container_id)"
+    [[ -n "${container_id}" ]] || fail "benchmark database container is not running"
+    docker cp "${container_id}:${container_directory}/." "${output_directory}/"
+    compose_exec database rm -rf -- "${container_directory}"
 }
 
 prepare_secret() {
@@ -131,7 +176,7 @@ psql_database() {
     local database="$1"
     shift
     assert_container_identity
-    compose exec --no-TTY database \
+    compose_exec database \
         psql \
         --no-psqlrc \
         --set ON_ERROR_STOP=1 \
@@ -237,7 +282,7 @@ create_run_dir() {
     run_dir="${RESULTS_DIR}/${run_id}"
     [[ ! -e "${run_dir}" ]] || fail "result directory already exists: ${run_dir}"
     mkdir -p "${run_dir}"
-    chmod 0777 "${run_dir}"
+    chmod 0700 "${run_dir}"
     printf '%s\n' "${run_dir}"
 }
 
@@ -304,7 +349,7 @@ command_verify_safety() {
 
     local output_file
     output_file="$(mktemp)"
-    if compose exec --no-TTY database \
+    if compose_exec database \
         psql \
         --no-psqlrc \
         --set ON_ERROR_STOP=1 \
@@ -381,8 +426,7 @@ pgbench_warmup() {
     local script="$1"
     local clients="$2"
     shift 2
-    compose exec --no-TTY database \
-        pgbench \
+    pgbench_exec \
         --no-vacuum \
         --username="${DATABASE_USER}" \
         --client="${clients}" \
@@ -407,30 +451,31 @@ pgbench_measure() {
         shift
     fi
     mkdir -p "${output_directory}"
-    chmod 0777 "${output_directory}"
-    local relative_directory
-    relative_directory="$(relative_result_path "${output_directory}")"
+    chmod 0700 "${output_directory}"
 
     if [[ "${already_warmed}" == false ]]; then
         pgbench_warmup "${script}" "${clients}" "$@"
     fi
 
+    local container_directory
+    container_directory="$(container_pgbench_log_dir "${output_directory}" "${label}")"
+    prepare_container_pgbench_logs "${container_directory}"
     local repeat
     for repeat in 1 2 3; do
-        compose exec --no-TTY database \
-            pgbench \
+        pgbench_exec \
             --no-vacuum \
             --username="${DATABASE_USER}" \
             --client="${clients}" \
             --jobs="${clients}" \
             --transactions="${transactions}" \
             --log \
-            --log-prefix="/benchmarks/${relative_directory}/${label}-r${repeat}-" \
+            --log-prefix="${container_directory}/${label}-r${repeat}-" \
             --file="${script}" \
             "$@" \
             "${MAIN_DATABASE}" \
             >"${output_directory}/${label}-r${repeat}-summary.txt"
     done
+    copy_container_pgbench_logs "${container_directory}" "${output_directory}"
 }
 
 record_restart_cold() {
@@ -440,26 +485,27 @@ record_restart_cold() {
     assert_container_identity
     assert_database_guard
 
-    local output_directory relative_directory
+    local output_directory container_directory
     output_directory="${run_dir}/restart-cold-db"
     mkdir -p "${output_directory}"
-    chmod 0777 "${output_directory}"
-    relative_directory="$(relative_result_path "${output_directory}")"
-    compose exec --no-TTY database \
-        pgbench \
+    chmod 0700 "${output_directory}"
+    container_directory="$(container_pgbench_log_dir "${output_directory}" restart-cold)"
+    prepare_container_pgbench_logs "${container_directory}"
+    pgbench_exec \
         --no-vacuum \
         --username="${DATABASE_USER}" \
         --client=1 \
         --jobs=1 \
         --transactions=1 \
         --log \
-        --log-prefix="/benchmarks/${relative_directory}/restart-cold-" \
+        --log-prefix="${container_directory}/restart-cold-" \
         --file=/benchmarks/sql/nearby.pgbench.sql \
         --define lon=174.7633 \
         --define lat=-36.8485 \
         --define radius_km=1.0 \
         "${MAIN_DATABASE}" \
         >"${output_directory}/summary.txt"
+    copy_container_pgbench_logs "${container_directory}" "${output_directory}"
 }
 
 measure_nearby_database() {
@@ -699,8 +745,9 @@ command_run() {
     assert_resolved_config
     wait_for_verified_run_stack
 
-    local run_dir git_sha source_hash cardinalities http_oracle
+    local run_dir run_id git_sha source_hash cardinalities http_oracle
     run_dir="$(create_run_dir run)"
+    run_id="$(basename "${run_dir}")"
     git_sha="$(git -C "${REPOSITORY_ROOT}" rev-parse HEAD)"
     source_hash="$(source_fingerprint)"
     capture_environment "${run_dir}"
@@ -724,12 +771,27 @@ command_run() {
     measure_writes_database "${run_dir}"
     measure_writes_http "${run_dir}"
 
+    assert_source_state_matches_seed
+    local completeness_tmp="${run_dir}/.raw-completeness.json.tmp"
+    if ! python3 "${SCRIPT_DIR}/validate_raw.py" \
+        --run-dir "${run_dir}" \
+        --pre-completion \
+        --run-id "${run_id}" \
+        --git-sha "${git_sha}" \
+        --source-fingerprint "${source_hash}" \
+        >"${completeness_tmp}"; then
+        rm -f "${completeness_tmp}"
+        fail "raw benchmark evidence is incomplete; database and manifest were not marked completed"
+    fi
+    mv "${completeness_tmp}" "${run_dir}/raw-completeness.json"
+
     psql_main --file /benchmarks/sql/complete_run.sql >/dev/null
-    printf '{"schema_version":1,"phase":"run","run_id":"%s","git_sha":"%s","source_fingerprint":"%s","completed":true}\n' \
-        "$(basename "${run_dir}")" \
+    printf '{"schema_version":2,"phase":"run","run_id":"%s","git_sha":"%s","source_fingerprint":"%s","completed":true,"raw_completeness":"raw-completeness.json"}\n' \
+        "${run_id}" \
         "${git_sha}" \
         "${source_hash}" \
         >"${run_dir}/manifest.json"
+    python3 "${SCRIPT_DIR}/validate_raw.py" --run-dir "${run_dir}" >/dev/null
     printf 'benchmark run completed; raw output: %s\n' "${run_dir}"
 }
 

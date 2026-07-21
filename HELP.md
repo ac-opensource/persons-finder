@@ -1,14 +1,19 @@
-# Getting Started
+# Persons Finder Help
 
-### Reference Documentation
-For further reference, please consider the following sections:
+Start with the [project README](README.md) for prerequisites, quick start,
+manual API examples, dashboard usage, verification, and the isolated benchmark
+workflow.
 
-* [Official Gradle documentation](https://docs.gradle.org)
-* [Spring Boot Gradle Plugin Reference Guide](https://docs.spring.io/spring-boot/docs/3.0.6/gradle-plugin/reference/html/)
-* [Create an OCI image](https://docs.spring.io/spring-boot/docs/3.0.6/gradle-plugin/reference/html/#build-image)
+Run the complete core verification, which makes no live-model call, with:
 
-### Additional Links
-These additional references should also help you:
+```bash
+./scripts/verify.sh
+```
 
-* [Gradle Build Scans – insights for your project's build](https://scans.gradle.com#gradle)
+The default stack uses the deterministic bio generator and requires no model
+API key. Additional project references:
 
+- [Security boundary and production gaps](SECURITY.md)
+- [Requirements and decision traceability](docs/REQUIREMENTS_TRACEABILITY.md)
+- [Explicit opt-in live-model evaluation](docs/LIVE_AI_EVALUATION.md)
+- [Curated AI collaboration record](AI_LOG.md)

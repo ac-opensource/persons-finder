@@ -206,6 +206,10 @@ service latency or production behavior.
   last-known projection index or avoided a history scan.
 - The benchmark harness was untracked, so the Git SHA alone is insufficient
   for reproduction.
+- The current harness now detaches Compose-exec stdin and requires an exact,
+  recorded raw-artifact completeness gate before completion or summarization.
+  That later hardening has not produced a new seed or measured run and does not
+  upgrade the historical evidence analyzed here.
 - Secure/authenticated HTTP trail performance remains outside this evidence.
 
 A performance result should not be published from this artifact set. A

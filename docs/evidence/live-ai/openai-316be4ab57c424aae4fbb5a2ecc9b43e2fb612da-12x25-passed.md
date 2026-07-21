@@ -38,6 +38,16 @@ The ignored JSON checkpoint retains the exhaustive sanitized machine facts. This
 | Final grounded limit (code points) | 732 |
 | Application generation deadline (ms) | 15000 |
 
+### Integration provenance
+
+This run executed against clean working revision
+`316be4ab57c424aae4fbb5a2ecc9b43e2fb612da`. The changes from that working
+revision were later squash-merged through
+[PR #9](https://github.com/ac-opensource/persons-finder/pull/9) as commit
+`a5baebace9a68e05838344b9bb5462c41a69e04a`. Because the squash created a new
+commit, the working revision remains this report's evidence identity and is not
+claimed to be part of `main` history.
+
 ## Acceptance gate
 
 | Metric | Value |

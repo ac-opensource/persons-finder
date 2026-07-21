@@ -416,15 +416,14 @@ moving a person changes the guarded seed. After any interactive use, run
 `reset` and `seed` again before measuring; do not use the dashboard during a
 measurement.
 
-> **Current measurement limitation:** a post-merge audit found that
-> `docker compose exec` can consume the standard input used by the
-> database-scenario loop. The current script may therefore process only its
-> first scenario while still marking the run complete. Do not use `run` output
-> for a performance or capacity claim until this is corrected and a fresh run
-> passes explicit workload-completeness checks.
+> **Current measurement status:** the post-merge standard-input defect is
+> corrected: every Compose `exec` is non-interactive, and `run` now refuses to
+> mark the database or manifest completed unless the exact raw workload plan
+> passes an explicit completeness validator. No fresh measured run from the
+> corrected harness is checked in, so do not make a performance or capacity
+> claim until one is executed and reviewed.
 
-The intended one-shot measurement entry point, for diagnosis or after that fix,
-accepts only a fresh passing seed:
+The one-shot measurement entry point accepts only a fresh passing seed:
 
 ```bash
 ./benchmarks/bin/benchmark verify-safety
@@ -564,7 +563,11 @@ Remote output must be one strict structured `bio_template`. The application
 validates placeholders, prose shape, policy, and bounds before inserting raw
 profile values locally in one parsed pass. Invalid startup configuration fails
 clearly, runtime failures are normalized, and there is no silent provider or
-deterministic fallback. The complete threat model and residual risks are in
+deterministic fallback. The final API bio contract is at most 732 Unicode code
+points: up to 512 model-authored literal code points plus at most 220 code
+points from the selected validated name, job title, and grounding hobby. The
+composer and both public response schemas enforce that same final bound. The
+complete threat model and residual risks are in
 [`SECURITY.md`](SECURITY.md).
 
 ## CI and Git workflow

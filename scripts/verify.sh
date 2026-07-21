@@ -2,6 +2,36 @@
 
 set -Eeuo pipefail
 
+# Ordinary verification disables every known live-provider selector, credential,
+# and authorization flag before invoking the project-controlled Gradle wrapper.
+# This prevents accidental provider calls; it is not a sandbox for arbitrary
+# build or test code and does not claim to scrub unrelated host credentials.
+unset \
+    RUN_LIVE_AI_TESTS \
+    LIVE_AI_PROVIDER \
+    LIVE_AI_EVAL_REPETITIONS \
+    LIVE_AI_EVAL_MAX_CALLS \
+    LIVE_AI_EVAL_MAX_FAILURE_UPPER_BOUND \
+    LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS \
+    LIVE_AI_AUTOMATIC_TELEMETRY_DISABLED_CONFIRMED \
+    LIVE_AI_APPLICATION_REQUEST_INSPECTION_CONFIRMED \
+    LIVE_AI_COMPLETE_ENVELOPE_INSPECTION_CONFIRMED \
+    OPENAI_API_KEY \
+    OPENAI_LIVE_MODEL \
+    OPENAI_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED \
+    GEMINI_API_KEY \
+    GEMINI_LIVE_MODEL \
+    GEMINI_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED \
+    ANTHROPIC_API_KEY \
+    ANTHROPIC_LIVE_MODEL \
+    ANTHROPIC_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED \
+    PERSONS_BIO_REMOTE_PROVIDER \
+    PERSONS_BIO_REMOTE_MODEL \
+    PERSONS_BIO_REMOTE_TIMEOUT
+
+export PERSONS_BIO_GENERATOR=deterministic
+export PERSONS_RUNTIME_MODE=assessment-local
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARTIFACT_DIR="$ROOT_DIR/build/verification"
 RUN_ID="$(date -u +%Y%m%d%H%M%S)-$$"
@@ -101,34 +131,6 @@ JAVA_SPECIFICATION_VERSION="$(
 docker info >/dev/null
 docker compose version
 ./gradlew --version
-
-# Ordinary verification must remain deterministic and credential-free even if
-# the invoking shell happens to contain live-provider configuration.
-unset \
-    RUN_LIVE_AI_TESTS \
-    LIVE_AI_PROVIDER \
-    LIVE_AI_EVAL_REPETITIONS \
-    LIVE_AI_EVAL_MAX_CALLS \
-    LIVE_AI_EVAL_MAX_FAILURE_UPPER_BOUND \
-    LIVE_AI_EVAL_MIN_CALL_INTERVAL_MS \
-    LIVE_AI_AUTOMATIC_TELEMETRY_DISABLED_CONFIRMED \
-    LIVE_AI_APPLICATION_REQUEST_INSPECTION_CONFIRMED \
-    LIVE_AI_COMPLETE_ENVELOPE_INSPECTION_CONFIRMED \
-    OPENAI_API_KEY \
-    OPENAI_LIVE_MODEL \
-    OPENAI_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED \
-    GEMINI_API_KEY \
-    GEMINI_LIVE_MODEL \
-    GEMINI_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED \
-    ANTHROPIC_API_KEY \
-    ANTHROPIC_LIVE_MODEL \
-    ANTHROPIC_LIVE_SYNTHETIC_RETENTION_AND_DATA_USE_APPROVED \
-    PERSONS_BIO_REMOTE_PROVIDER \
-    PERSONS_BIO_REMOTE_MODEL \
-    PERSONS_BIO_REMOTE_TIMEOUT
-
-export PERSONS_BIO_GENERATOR=deterministic
-export PERSONS_RUNTIME_MODE=assessment-local
 
 CURRENT_PHASE="focused bio adapter and conformance tests"
 printf '\nRunning focused credential-free bio adapter checks\n'

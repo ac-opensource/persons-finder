@@ -453,7 +453,12 @@ and two sentences, against the precommitted 256/512/732 limits.
 All three 300-call aggregates are independent fixed runs. Their samples,
 failure counts, and Wilson statistics are not pooled. The final passing result
 gates only revision `316be4ab57c424aae4fbb5a2ecc9b43e2fb612da` under its
-recorded provider conditions and stricter policy. Including the six historical
+recorded provider conditions and stricter policy. The changes from that clean
+working revision were later squash-merged through
+[PR #9](https://github.com/ac-opensource/persons-finder/pull/9) as commit
+`a5baebace9a68e05838344b9bb5462c41a69e04a`. Because the squash created a new
+commit, `316be4ab57c424aae4fbb5a2ecc9b43e2fb612da` remains the evidence identity
+and is not claimed to be part of `main` history. Including the six historical
 diagnostic/calibration reports and all three aggregates, the paid evidence
 comprises 945 calls, 236,485 input tokens, and 46,011 output tokens, with
 estimated usage of USD 0.512551. `actual_billed_usd` remains unavailable

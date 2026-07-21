@@ -56,11 +56,15 @@ evidence completeness, redaction, and failure/interruption paths.
 300 sends but produced 299 valid results and one timeout, correctly failing
 the precommitted 1% Wilson gate. Revision `7e02d65` passed 300/300 after the
 deadline change but preceded the stricter policy. The fresh final-policy run
-at revision `316be4a` completed 300/300 valid results, 298 distinct outputs,
-zero retries, top-ups, fallbacks, boundary violations, or harness errors,
-and a one-sided 95% Wilson upper failure bound of 0.8938%. The final branch
-also passed 320 tests with zero failures and `./scripts/verify.sh`; the work
-merged as `a5baeba`.
+at clean working revision `316be4ab57c424aae4fbb5a2ecc9b43e2fb612da`
+completed 300/300 valid results, 298 distinct outputs, zero retries, top-ups,
+fallbacks, boundary violations, or harness errors, and a one-sided 95% Wilson
+upper failure bound of 0.8938%. Those source changes were later squash-merged
+through [PR #9](https://github.com/ac-opensource/persons-finder/pull/9) as
+commit `a5baebace9a68e05838344b9bb5462c41a69e04a`; the squash commit is the
+mainline provenance, while the original working revision is not itself part
+of `main` history. The final branch also passed 320 tests with zero failures
+and `./scripts/verify.sh`.
 
 **Resulting lesson:** For nondeterministic AI, correctness should be an
 application-owned property contract rather than an exact string assertion.
@@ -89,9 +93,11 @@ coordinates with immutable observations plus a serving projection.
 and rejected overwriting a person's coordinates because it destroyed useful
 history. I selected append-only accepted observations with a transactionally
 maintained, rebuildable last-known projection. I required inclusive,
-unrounded spheroidal membership and ordering, UUID tie-breaking, and no
-stored coordinates in public responses. I also kept the one-million-row
-benchmark deferred until mandatory correctness was proven.
+unrounded spheroidal membership and ordering, UUID tie-breaking, and kept
+stored coordinates out of POST and PUT responses. The approved nearby
+contract instead returns the exact canonical last-known projection point used
+for membership and ordering in the loopback assessment. I also kept the
+one-million-row benchmark deferred until mandatory correctness was proven.
 
 **How we resolved the challenge:** The persistence model stores canonical
 `geography(Point,4326)` observations and a one-row-per-person projection.
@@ -111,11 +117,15 @@ duplicate, and tied-distance fixtures. The
 deterministic projection rows plus two local matches and showed an index scan
 on `last_known_location_projection_location_gist_idx`; it is explicitly not
 presented as a benchmark. The
-[Docker HTTP smoke](docs/evidence/nearby-docker-smoke.md) created seven
-people and observed six results: the exact 10 km point was included,
-10,000.001 m was excluded, ties followed UUID order, and no coordinates were
-returned. The write model merged as `606527e`; indexed nearby search merged
-as `2a59488`.
+[historical Docker HTTP smoke](docs/evidence/nearby-docker-smoke.md) created
+seven people and observed six results: the exact 10 km point was included,
+10,000.001 m was excluded, and ties followed UUID order. Its then-observed
+coordinate omission predates the approved nearby response correction. POST
+and PUT still omit coordinates, while the corrected
+[nearby/dashboard smoke](docs/evidence/nearby-location-dashboard-smoke-2026-07-20-utc.md)
+verified that nearby returns the exact nested last-known projection point.
+The write model merged as `606527e`; indexed nearby search merged as
+`2a59488`.
 
 **Resulting lesson:** Location correctness depends on aligning the product
 metric, storage semantics, index strategy, and exact ordering algorithm.
