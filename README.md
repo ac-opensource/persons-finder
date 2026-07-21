@@ -72,77 +72,196 @@ Submit your repository link. We will read your code, your `AI_LOG.md`, and your 
 
 ---
 
-## Run the mandatory core
+## Implementation guide
+
+This repository contains a Kotlin/Spring Boot implementation of the challenge,
+a PostgreSQL/PostGIS data store, a same-origin web dashboard, and an isolated
+one-million-person benchmark harness. The default runtime is deliberately
+local, deterministic, and free of model-provider credentials.
+
+### Contents
+
+- [Technology](#technology)
+- [Quick start](#quick-start)
+- [Secrets, passwords, and API keys](#secrets-passwords-and-api-keys)
+- [API](#api)
+- [Web dashboard](#web-dashboard)
+- [Tests and verification](#tests-and-verification)
+- [Benchmark](#benchmark)
+- [Architecture](#architecture)
+- [CI and Git workflow](#ci-and-git-workflow)
+- [Documentation map](#documentation-map)
+
+## Technology
+
+| Area | Choice |
+| --- | --- |
+| Application | Kotlin 2.4.10, Spring Boot 4.1.0, Java 17 |
+| Build | Gradle Wrapper 9.6.1 |
+| Persistence | PostgreSQL 17, PostGIS, Flyway, Spring JDBC |
+| Web | Static HTML/CSS/JavaScript served by Spring; Leaflet from a WebJar |
+| Tests | JUnit, Spring Boot Test, Testcontainers/PostGIS, Node's built-in test runner |
+| Local runtime | Docker Engine with Docker Compose v2 |
+
+The public person API implements only the three unversioned routes required by
+the challenge. The default Compose project publishes the application on IPv4
+loopback and does not publish the database port.
+
+## Quick start
 
 ### Prerequisites
 
-- JDK 17
-- Node.js 18 or newer
-- Docker Engine with Docker Compose
-- `curl`, `jq`, and `openssl`
+For the normal Docker backend and dashboard:
 
-The default Compose stack runs PostgreSQL 17 with PostGIS inside Docker. The
-application is published only on `127.0.0.1`, the database has no host port,
-and the bio generator is deterministic and credential-free. No external model
-credential is required or mounted.
+- Docker Engine with Docker Compose v2;
+- `openssl` to create the local database password; and
+- `curl` 7.76 or newer and `jq` for the command-line API examples.
 
-### Verify the core candidate
+For builds and the full verifier, also install JDK 17 and Node.js 18 or newer.
+The benchmark additionally requires Python 3.9 or newer and Git.
 
-Run the same credential-free command used by the pull-request build:
+### 1. Create the database password once
 
-```bash
-./scripts/verify.sh
-```
-
-The script:
-
-1. checks the required toolchain and JDK version;
-2. runs focused dashboard, bio adapter, privacy-boundary, transport, and
-   evaluation harness tests;
-3. runs `./gradlew clean build`;
-4. builds and starts an isolated Compose project on an ephemeral loopback port;
-5. exercises `POST /persons`, `PUT /persons/{id}/location`, and
-   `GET /persons/nearby`;
-6. checks Flyway/PostGIS, database isolation, and retained data across restart;
-7. checks the resolved Compose configuration and captured logs for the
-   generated database secret and fixed synthetic profile values; and
-8. removes the disposable verification project, including its images and
-   volume.
-
-Evidence is written under `build/reports/` and `build/verification/`. The
-script explicitly disables live-provider configuration and records
-`live_provider_calls=disabled` in `build/verification/summary.txt`.
-The separately gated paid nondeterministic protocol and its human-readable,
-content-safe evidence report are documented in
-[`docs/LIVE_AI_EVALUATION.md`](docs/LIVE_AI_EVALUATION.md).
-The final OpenAI run made exactly 12 x 25 = 300 calls at revision
-`316be4ab57c424aae4fbb5a2ecc9b43e2fb612da`: all 300 passed the stricter
-deterministic application contract, with a one-sided 95% Wilson upper failure
-bound of 0.8938%. Review the
-[human-readable paid-run report](docs/evidence/live-ai/openai-316be4ab57c424aae4fbb5a2ecc9b43e2fb612da-12x25-passed.md);
-machine-oriented JSON remains ignored and untracked.
-
-### Run the core stack manually
-
-Create the ignored database-password file used by `compose.yaml`:
+Run this from the repository root. The conditional avoids overwriting an
+existing nonempty password file. If that file is missing or empty but the
+`persons-finder` database volume already exists, stop and recover its matching
+password; do not generate a replacement unless you also intend to delete and
+recreate the volume.
 
 ```bash
 mkdir -p .secrets
 chmod 700 .secrets
-openssl rand -hex 32 > .secrets/database-password
+
+if [ ! -s .secrets/database-password ]; then
+  openssl rand -hex 32 > .secrets/database-password
+fi
+
 chmod 444 .secrets/database-password
 ```
 
-Validate, build, and start the stack:
+The directory is private on the host. The password file is read-only and must
+remain readable by the non-root application container when Compose mounts it.
+
+### 2. Start the backend and database
 
 ```bash
 docker compose config --quiet
-docker compose build
-docker compose up --detach --wait
-curl --fail http://127.0.0.1:8080/actuator/health/readiness
+docker compose up --detach --build --wait
+
+curl --fail --silent --show-error \
+  http://127.0.0.1:8080/actuator/health/readiness
 ```
 
-Exercise the three mandatory routes:
+Useful local URLs:
+
+- Dashboard: <http://127.0.0.1:8080/>
+- Swagger UI: <http://127.0.0.1:8080/swagger-ui/index.html>
+- OpenAPI JSON: <http://127.0.0.1:8080/v3/api-docs>
+- Readiness: <http://127.0.0.1:8080/actuator/health/readiness>
+
+If port `8080` is already in use, select another loopback port for the startup
+command:
+
+```bash
+PERSONS_FINDER_PORT=8081 docker compose up --detach --build --wait
+curl --fail http://127.0.0.1:8081/actuator/health/readiness
+```
+
+### 3. Inspect or stop the stack
+
+```bash
+docker compose ps
+docker compose logs --follow app
+```
+
+Stop the containers while preserving the named database volume:
+
+```bash
+docker compose down
+```
+
+Delete the development database only when that data is intentionally
+disposable:
+
+```bash
+docker compose down --volumes
+```
+
+## Secrets, passwords, and API keys
+
+| Purpose | Location or environment variable | Required for |
+| --- | --- | --- |
+| Development database | `.secrets/database-password` | Tracked `compose.yaml` |
+| Benchmark database | `.secrets/benchmark-database-password` | Auto-created by the benchmark wrapper |
+| OpenAI | `OPENAI_API_KEY` | Explicit live-AI tasks only |
+| Gemini | `GEMINI_API_KEY` | Explicit live-AI tasks only |
+| Anthropic | `ANTHROPIC_API_KEY` | Explicit live-AI tasks only |
+
+`.secrets/`, `.env`, build output, benchmark raw results, and local agent notes
+are ignored by Git. `.secrets/` is also excluded from Docker build contexts.
+Never commit a key or paste one into a command argument, Gradle property, JSON
+fixture, log, or issue.
+
+### Database-password lifecycle
+
+PostgreSQL consumes the password when it initializes the named volume. Do not
+regenerate `.secrets/database-password` while retaining that volume: changing
+only the file can prevent the application from reconnecting. Recover the
+original secret, or deliberately run `docker compose down --volumes` and start
+with a fresh database.
+
+### Model API keys
+
+No model API key is needed for the backend, dashboard, tests, CI, or benchmark.
+Those paths select the deterministic generator. The tracked Compose file mounts
+only the database password and intentionally does not forward model-provider
+configuration or credentials.
+
+If a separately authorized live-provider evaluation is required, store only
+the selected provider key under the ignored directory, for example:
+
+```bash
+mkdir -p .secrets
+chmod 700 .secrets
+$EDITOR .secrets/openai-api-key
+chmod 400 .secrets/openai-api-key
+```
+
+The code-supported remote runtime requires all of the following:
+
+| Variable | Required value |
+| --- | --- |
+| `PERSONS_BIO_GENERATOR` | `remote` |
+| `PERSONS_RUNTIME_MODE` | `network-private` |
+| `PERSONS_BIO_REMOTE_PROVIDER` | Exactly one of `openai`, `gemini`, or `anthropic` |
+| `PERSONS_BIO_REMOTE_MODEL` | The selected provider's exact model ID |
+| `PERSONS_BIO_REMOTE_TIMEOUT` | Optional duration from 1 through 15 seconds |
+| Provider key | Only the matching `OPENAI_API_KEY`, `GEMINI_API_KEY`, or `ANTHROPIC_API_KEY` |
+
+This is not a supported default-Compose mode: prefixing `docker compose up`
+with those variables does not pass them into the container.
+Use the explicit, fail-closed `liveAiSmoke` or `liveAiEval` instructions in
+[`docs/LIVE_AI_EVALUATION.md`](docs/LIVE_AI_EVALUATION.md). Those tasks can make
+billable network calls and require a clean revision plus provider-specific
+privacy, retention, telemetry, request-inspection, pacing, and call-budget
+approval. They are never run by the ordinary build or CI workflows.
+
+## API
+
+| Route | Behavior |
+| --- | --- |
+| `POST /persons` | Validates a profile and initial point, generates and validates a bio, then atomically stores the person, initial observation, and last-known projection. |
+| `PUT /persons/{id}/location` | Appends an accepted location observation and transactionally advances the last-known projection when that observation wins. Optional `capturedAt` and `clientUpdateId` must be supplied together for replay-safe client updates. |
+| `GET /persons/nearby?lat=...&lon=...&radius=...` | Returns all matches within `0 < radius <= 100` kilometres, sorted by unrounded spheroidal distance and then UUID. Each item includes the exact matching last-known point and one-decimal `distanceKm`. |
+
+Unknown fields and malformed requests are rejected with sanitized
+`application/problem+json` responses. There are no versioned or compatibility
+route aliases. The generated Swagger UI is useful for exploration; the
+challenge brief, executable tests, and
+[`docs/REQUIREMENTS_TRACEABILITY.md`](docs/REQUIREMENTS_TRACEABILITY.md) remain
+authoritative if generated documentation drifts.
+
+### Exercise the routes
 
 ```bash
 PERSON_ID="$(
@@ -159,10 +278,12 @@ curl --fail-with-body --silent --show-error \
   --data '{"latitude":-36.8485,"longitude":174.7633}'
 
 curl --fail-with-body --silent --show-error \
-  'http://127.0.0.1:8080/persons/nearby?lat=-36.8485&lon=174.7633&radius=1'
+  'http://127.0.0.1:8080/persons/nearby?lat=-36.8485&lon=174.7633&radius=1' |
+  jq
 ```
 
-Inspect the applied migrations and PostGIS version:
+Inspect the real database extension and Flyway history without publishing a
+database port:
 
 ```bash
 docker compose exec -T database \
@@ -174,70 +295,166 @@ docker compose exec -T database \
   --command='SELECT PostGIS_Full_Version();'
 ```
 
-Stop the stack while preserving its named database volume:
+## Web dashboard
 
-```bash
-docker compose down
-```
+The web app is packaged into the Spring Boot service. There is no separate
+frontend install, build, port, or development server. Start the normal stack
+and open <http://127.0.0.1:8080/>.
 
-Use `docker compose down --volumes` only when deletion of the local database
-volume is intended. See [`SECURITY.md`](SECURITY.md) for the implemented
-security boundary and known production gaps.
+The dashboard composes only the three core routes:
 
-## Local web dashboard
+- click the map to create a person;
+- drag a person created or previously moved by the current tab to append a new
+  location; and
+- change the search centre or radius to fetch nearby people in API order.
 
-The Spring application serves a same-origin dashboard at
-<http://127.0.0.1:8080/> when the loopback-only default stack is running. Click
-the map to create a person, drag a person created or previously moved by this
-tab to update their last-known location, or set a nearby-search centre and
-radius. The dashboard composes only the three core routes:
-`POST /persons`, `PUT /persons/{id}/location`, and `GET /persons/nearby`.
+Nearby-only markers are read-only. The browser stores a tab-local set of
+draggable person IDs in `sessionStorage`; profile details and coordinates stay
+in page memory and are rehydrated from nearby results. **Forget tab map data**
+clears only that browser mapping—it does not delete a person, observation, or
+database row.
 
-Every nearby item includes the canonical last-known point as nested
-`location.latitude` and `location.longitude`, so the dashboard can plot
-existing and seeded people returned by the search. Selecting either a map point
-or a nearby result opens the person's details in a floating window, independent
-of the result-list length. `POST /persons` and
-`PUT /persons/{id}/location` response shapes remain unchanged and do not return
-coordinates. The browser keeps only a tab-local set of draggable person IDs in
-`sessionStorage`; profile details and coordinates stay in memory and are
-rehydrated from nearby results after a reload. Markers learned only from a
-nearby response are visible but not draggable. Closing the tab ends that page
-session.
-**Forget tab map data** clears only that browser mapping—it does not delete
-people or location observations from the backend, and a later nearby search can
-display their last-known locations again.
+The map is tile-free by default. Appending `?tiles=osm` deliberately enables
+OpenStreetMap's public tile service:
+
+<http://127.0.0.1:8080/?tiles=osm>
+
+That opt-in discloses the viewed tile area and browser referrer to a third
+party. The API is unauthenticated and nearby results expose exact last-known
+coordinates, so keep both the dashboard and API on loopback. They are not an
+internet-facing deployment design; see [`SECURITY.md`](SECURITY.md).
 
 ### Dashboard demos
 
-#### Interactive workflow
-
 ![Creating, dragging, searching, and inspecting people in the local dashboard](docs/assets/dashboard-demo-non-seeded.gif)
-
-#### Seeded benchmark
 
 ![Exploring dense seeded nearby results at different radii](docs/assets/dashboard-demo-seeded.gif)
 
-### Run the seeded dashboard
+## Tests and verification
 
-The isolated benchmark requires Docker Engine with Compose v2, Python 3.9 or
-newer, `curl`, `openssl`, and enough local disk for 1,000,000 people and
-5,000,000 location observations. From the repository root, build the benchmark
-stack, create its ignored local database secret, seed the deterministic data,
-and run the correctness gates:
+| Command | Scope | Extra requirements |
+| --- | --- | --- |
+| `./gradlew dashboardJsTest --no-daemon --console=plain` | Dashboard response-shape and coordinate tests | Node.js 18+ |
+| `./gradlew test --no-daemon --console=plain` | Kotlin unit, HTTP contract, and real-PostGIS Testcontainers tests | JDK 17, Docker |
+| `./gradlew clean build --no-daemon --console=plain` | Clean compile, all tests, dashboard tests, and packaged application | JDK 17, Node.js 18+, Docker |
+| `./scripts/verify.sh` | Canonical local and pull-request verification | JDK 17, Node.js 18+, Docker Compose, `curl`, `jq`, `openssl` |
+
+`./scripts/verify.sh` is the strongest ordinary gate. It:
+
+1. validates the toolchain and forces deterministic, credential-free bio mode;
+2. runs focused bio, privacy-boundary, provider-adapter, transport, and
+   evaluation-harness tests;
+3. runs the complete clean Gradle build;
+4. builds a uniquely named disposable Compose project on an ephemeral
+   loopback port;
+5. smokes all three routes and validates response contracts;
+6. checks Flyway, PostGIS, application/database port isolation, and data
+   retention across restart;
+7. checks resolved configuration and captured logs for the generated password
+   and fixed synthetic profile values; and
+8. removes only its disposable containers, images, network, secret, and volume.
+
+Results are written to:
+
+```text
+build/reports/tests/test/
+build/test-results/test/
+build/verification/
+```
+
+The summary records `live_provider_calls=disabled`. Live-provider tasks and the
+one-million-person benchmark are intentionally separate from this gate.
+
+## Benchmark
+
+The benchmark is an isolated bonus harness. It never targets the normal
+`persons-finder` Compose project, database, or volume.
+
+### Requirements and isolation
+
+- Docker Engine with Compose v2;
+- Python 3.9 or newer, using only the standard library;
+- `curl`, `openssl`, and Git;
+- free loopback ports `18081` and `18082`; and
+- enough disk for 1,000,000 people, 5,000,000 observations, projections,
+  indexes, oracle tables, and raw result files.
+
+| Resource | Fixed benchmark value |
+| --- | --- |
+| Compose project | `persons-finder-benchmark` |
+| Main database | `persons_finder_benchmark` |
+| Sample database | `persons_finder_benchmark_appsample` |
+| Main API/dashboard | `127.0.0.1:18081` |
+| Sample application | `127.0.0.1:18082` |
+| Guarded volume | `persons-finder-benchmark-postgres-data-v1` |
+
+The database has no host port. The wrapper creates
+`.secrets/benchmark-database-password` if it is missing.
+
+### Command workflow
+
+Inspect the resolved isolated configuration without starting containers:
+
+```bash
+./benchmarks/bin/benchmark config
+```
+
+Create the deterministic dataset and run the correctness gates:
 
 ```bash
 ./benchmarks/bin/benchmark seed
 ```
 
-The command leaves the isolated stack running. When it completes, open
-<http://127.0.0.1:18081/> to use the dashboard against the seeded database.
-The separate default development stack and database are not used. Creating or
-moving a person changes this benchmark seed; run the guarded `reset` and
-`seed` sequence again before a measured `benchmark run`, and do not interact
-with the dashboard while that measurement is active.
+The seed uses real application transactions for a 100-person sample, then
+loads exactly 1,000,000 people, 5,000,000 location observations, and 1,000,000
+last-known projections in PostgreSQL. It verifies projection winners and nearby
+scenarios against brute-force oracles, writes ignored raw evidence under
+`benchmarks/results/seed-<timestamp>/`, and leaves the isolated stack running.
 
-To stop the benchmark containers while preserving the seeded volume:
+Open <http://127.0.0.1:18081/> to explore the seeded dashboard. Creating or
+moving a person changes the guarded seed. After any interactive use, run
+`reset` and `seed` again before measuring; do not use the dashboard during a
+measurement.
+
+> **Current measurement limitation:** a post-merge audit found that
+> `docker compose exec` can consume the standard input used by the
+> database-scenario loop. The current script may therefore process only its
+> first scenario while still marking the run complete. Do not use `run` output
+> for a performance or capacity claim until this is corrected and a fresh run
+> passes explicit workload-completeness checks.
+
+The intended one-shot measurement entry point, for diagnosis or after that fix,
+accepts only a fresh passing seed:
+
+```bash
+./benchmarks/bin/benchmark verify-safety
+./benchmarks/bin/benchmark run
+```
+
+`run` checks the seeded Git SHA, source fingerprint, database identity,
+cardinalities, projection state, and correctness result before it measures.
+It refuses an altered, incomplete, or already measured seed. If a run fails or
+is interrupted after entering its running state, start again with:
+
+```bash
+./benchmarks/bin/benchmark reset
+./benchmarks/bin/benchmark seed
+./benchmarks/bin/benchmark run
+```
+
+After a successful run, summarize only its raw directory:
+
+```bash
+./benchmarks/bin/benchmark summarize run-YYYYMMDDTHHMMSSZ
+```
+
+This writes
+`benchmarks/results/run-YYYYMMDDTHHMMSSZ/summary.md`; it does not rewrite the
+curated [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
+
+### Stop, restart, or reset
+
+Stop containers while preserving the benchmark volume:
 
 ```bash
 docker compose \
@@ -247,7 +464,7 @@ docker compose \
   down
 ```
 
-Restart that preserved seed later with:
+Restart the preserved seed:
 
 ```bash
 docker compose \
@@ -257,22 +474,150 @@ docker compose \
   up --detach --wait
 ```
 
-Run `./benchmarks/bin/benchmark reset` only when you intend to delete the
-guarded benchmark volume and create a fresh seed; raw result files are
-preserved. The full benchmark workflow and the boundary of the currently
-available results are documented in
-[`benchmarks/README.md`](benchmarks/README.md) and
-[`benchmarks/RESULTS.md`](benchmarks/RESULTS.md).
+Stop and remove the benchmark containers, orphans, and networks, and delete its
+guarded volume while preserving raw results, its generated password, and built
+images:
 
-The assessment-default API is unauthenticated and bound to loopback. Its nearby
-response discloses exact last-known locations, so do not publish this dashboard
-or API beyond a trusted local environment without authentication, per-person
-authorization, abuse controls, and an approved location-disclosure policy.
+```bash
+./benchmarks/bin/benchmark reset
+```
 
-The dashboard is tile-free by default, so ordinary map interaction does not
-send the viewed area to a third-party basemap. To deliberately opt in to
-OpenStreetMap's public tile service for a local demo, open
-<http://127.0.0.1:8080/?tiles=osm> (or use port `18081` for the seeded stack).
-That opt-in makes network requests which disclose the viewed tile area and
-browser referrer. See `SECURITY.md` for the data boundary and deployment
-caveats.
+### Current evidence boundary
+
+The checked-in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) contains
+seed-and-correctness evidence only. It contains no completed measured run,
+latency distribution, throughput result, indexed/unindexed comparison, current
+query-plan set, bottleneck conclusion, or production-capacity claim. A
+fresh run with explicit workload-completeness checks is required before any of
+those claims can be made. Until then, treat `benchmark run` as an
+evidence-generation entry point, not as a verified published result. See
+[`benchmarks/README.md`](benchmarks/README.md) for the hypotheses, raw layout,
+and interpretation rules.
+
+## Architecture
+
+Persons Finder is one Spring Boot service organized by feature. It uses clear
+controller, application-service, domain, and repository boundaries without
+claiming infrastructure-independent persistence or a complete production DDD
+system.
+
+```mermaid
+flowchart LR
+    Client["Browser or API client"] --> Controller["Spring MVC controllers"]
+    Controller --> Service["Feature services"]
+    Service --> Domain["Domain policies and value types"]
+    Service --> Ports["Application-owned repository ports"]
+    Ports --> JDBC["Spring JDBC adapters"]
+    JDBC --> DB[("PostgreSQL 17 + PostGIS")]
+    Flyway["Flyway migrations V1-V3"] --> DB
+
+    Service --> BioPort["BioGenerator port"]
+    BioPort --> Deterministic["Deterministic generator (default)"]
+    BioPort --> Remote["RemoteBioGenerator (opt-in)"]
+    Remote --> Provider["OpenAI, Gemini, or Anthropic client"]
+```
+
+### Feature and package map
+
+| Package or path | Responsibility |
+| --- | --- |
+| `person/create` | POST transport contract, create use case, and repository port |
+| `person/location/update` | PUT contract, retry/idempotency behavior, locking, and projection advancement |
+| `person/nearby` | GET contract and indexed spatial read |
+| `person/model` | Typed UUIDs, profile normalization, coordinate canonicalization, observation ordering |
+| `person/bio` | Prompt-injection policy, provider-neutral generator port, deterministic adapter, output validation, local composition |
+| `person/bio/remote` | Provider clients and bounded JDK HTTP transport |
+| `person/persistence` | JDBC write-side adapter shared by create and location update |
+| `web` | Strict JSON, Problem Details, and shared HTTP validation |
+| `src/main/resources/db/migration` | Flyway-owned PostGIS schema |
+| `src/main/resources/static` | Same-origin dashboard assets |
+
+### Data model and request flows
+
+| Table | Role |
+| --- | --- |
+| `person` | Public profile and persisted generated bio |
+| `location_observation` | Append-only accepted location history during normal operation |
+| `last_known_location_projection` | One transactionally maintained winning observation per person |
+
+- **Create:** the service validates source text, applies the bio policy,
+  generates and revalidates the bio, and performs trusted local grounding
+  before opening the transaction that inserts all three records. Any bio policy,
+  provider, validation, or persistence failure leaves no partial person state.
+- **Location update:** the service locks the last-known row, resolves no-key or
+  client-key replay behavior, appends a new accepted observation when needed,
+  and advances the projection using `(capturedAt, receivedAt, observationId)`.
+- **Nearby:** the repository reads only the projection, uses spheroidal
+  `ST_DWithin` for membership and `ST_Distance` for ordering, then UUID for a
+  stable tie-break. The projection's `geography(Point,4326)` column has a GiST
+  index.
+
+### AI boundary
+
+`BioGenerator` is application-owned and provider-neutral. The default adapter
+is deterministic. The optional remote adapter sends only closed broad job and
+interest codes plus fixed deployment context; raw names, jobs, hobbies,
+coordinates, IDs, and credentials cannot enter its typed request. Provider
+clients own authentication and wire formats.
+
+Remote output must be one strict structured `bio_template`. The application
+validates placeholders, prose shape, policy, and bounds before inserting raw
+profile values locally in one parsed pass. Invalid startup configuration fails
+clearly, runtime failures are normalized, and there is no silent provider or
+deterministic fallback. The complete threat model and residual risks are in
+[`SECURITY.md`](SECURITY.md).
+
+## CI and Git workflow
+
+### GitHub Actions
+
+| Workflow | Trigger | Work performed |
+| --- | --- | --- |
+| [`PR build`](.github/workflows/pr-build.yml) | Pull requests targeting `main` | Sets up JDK 17 and Gradle, runs `./scripts/verify.sh`, and always uploads test/verification artifacts for 7 days. A newer run cancels an older run for the same PR. |
+| [`Dependency review`](.github/workflows/dependency-review.yml) | Pull requests targeting `main` | Fails high-severity dependency changes in runtime, development, or unknown scopes. |
+| [`Security scan`](.github/workflows/security-scan.yml) | Pull requests targeting `main`, manual dispatch, and Monday at 04:17 UTC | Runs Trivy repository-misconfiguration scanning and separate application/PostGIS image vulnerability scans. HIGH/CRITICAL findings fail under the workflow's configured filters. |
+| [`Dependency submission`](.github/workflows/dependency-submission.yml) | Pull requests targeting `main`, manual dispatch, and relevant Gradle/workflow changes pushed to `main` | Generates the Gradle dependency graph. PR graphs are uploaded for a separate least-privilege submission workflow; push/manual graphs are submitted directly. |
+
+Dependabot checks Gradle dependencies every Monday at 04:00 UTC and GitHub
+Actions at 04:30 UTC, grouping minor/patch Gradle updates and action updates.
+Workflow actions are pinned to full commit SHAs. Live-provider tasks and the
+one-million-person benchmark are intentionally absent from pull-request CI.
+
+### Contributor flow
+
+The tracked workflows establish PRs targeting `main`; repository files do not
+encode a required branch prefix, commit-message convention, review count, or
+merge strategy. A minimal local flow is:
+
+```bash
+git fetch origin
+git switch -c <branch-name> origin/main
+
+# Make the scoped change, then run the strongest relevant gate.
+./scripts/verify.sh
+git diff --check
+git status --short
+```
+
+Open a pull request targeting `main`. Keep `.secrets/`, `.env`, `.agents/`,
+build output, and `benchmarks/results/` out of commits. The workflow files do
+not themselves prove live branch-protection or required-check settings, so this
+README does not claim those external GitHub controls.
+
+## Documentation map
+
+- [`SECURITY.md`](SECURITY.md): implemented prompt-injection, privacy, egress,
+  logging, secret, location-disclosure, and production-gap analysis.
+- [`AI_LOG.md`](AI_LOG.md): three evidence-backed AI collaboration case studies.
+- [`docs/REQUIREMENTS_TRACEABILITY.md`](docs/REQUIREMENTS_TRACEABILITY.md):
+  human-owned decisions, implementation status, verification evidence, and
+  deferred scope.
+- [`docs/decisions/0001-api-and-domain-contract.md`](docs/decisions/0001-api-and-domain-contract.md):
+  API and domain contract rationale.
+- [`docs/decisions/0002-geospatial-search.md`](docs/decisions/0002-geospatial-search.md):
+  PostGIS query and indexing decision.
+- [`docs/LIVE_AI_EVALUATION.md`](docs/LIVE_AI_EVALUATION.md): separately gated,
+  potentially billable provider smoke and reliability protocol.
+- [`benchmarks/README.md`](benchmarks/README.md) and
+  [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md): benchmark protocol and the
+  exact boundary of checked-in evidence.
