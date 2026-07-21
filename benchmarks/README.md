@@ -34,7 +34,8 @@ production winner expression, and run correctness gates:
 
 Run database-only and core HTTP nearby measurements, the controlled
 indexed/unindexed comparison, write-path workloads, database-only history
-pagination, and query-plan capture:
+pagination, and query-plan capture. Every Compose `exec` is non-interactive so
+it cannot consume the CSV input that drives the scenario loops:
 
 ```bash
 ./benchmarks/bin/benchmark run
@@ -63,8 +64,10 @@ wrong expected database:
 ```
 
 `seed` refuses a non-empty benchmark database. `run` refuses a database that
-has not passed correctness or has already been measured. Repeatable runs
-therefore use `reset`, `seed`, then `run`.
+has not passed correctness or has already been measured. It also refuses to
+mark the database or manifest completed unless the complete raw artifact plan
+passes exact validation. Repeatable runs therefore use `reset`, `seed`, then
+`run`.
 
 Creating or moving a person through the seeded dashboard changes the benchmark
 database. The `run` preflight rejects changed seed cardinalities, identity, or
@@ -160,6 +163,7 @@ Each executed seed or run creates a timestamped directory:
 ```text
 benchmarks/results/<run-id>/
   manifest.json
+  raw-completeness.json
   environment.json
   database-environment.csv
   seed.log
@@ -178,15 +182,43 @@ benchmarks/results/<run-id>/
 ```
 
 Database timings are raw `pgbench` logs. HTTP timings are one JSON object per
-request. No placeholder summary is created. After `run` has produced a
-completed raw manifest, generate a concise raw-derived summary with:
+request. Before the database and schema-2 run manifest are marked completed,
+the wrapper requires:
+
+- all ten nearby scenarios, each with three 200-sample database blocks and
+  three 200-sample core-HTTP latency blocks;
+- every declared duration-based throughput scenario, concurrency, repeat, and
+  worker, with nonempty contiguous worker iterations;
+- both baseline and both history workloads with three 200-sample blocks each;
+- all four database write workloads with three 8,000-sample blocks each and
+  all four 1,000-request HTTP write cohorts;
+- the restart-first sample, six write-count snapshots, environment identity,
+  exact HTTP oracle coverage, and all five JSON plans.
+
+The deterministic `raw-completeness.json` records those validated counts. No
+placeholder summary is created. After `run` has produced a completed raw
+manifest, generate a concise raw-derived summary with:
 
 ```bash
 ./benchmarks/bin/benchmark summarize <run-id>
 ```
 
-The command refuses incomplete or missing raw output and writes only
-`benchmarks/results/<run-id>/summary.md`. It does not create `RESULTS.md`.
+The command reruns the same exact validation, requires the recorded
+completeness report to match the current raw artifacts, and refuses incomplete,
+missing, or subsequently changed output. It writes only
+`benchmarks/results/<run-id>/summary.md`; it does not create `RESULTS.md`.
+
+Result directories remain private (`0700`). `pgbench` writes logs first to a
+container-private `0700` temporary directory; after a workload succeeds,
+`docker cp` copies them into the host-owned private result directory and the
+container copy is deleted. The database container never receives write access
+to the host result tree.
+
+Run the credential-free benchmark harness checks with:
+
+```bash
+python3 -m unittest discover -s benchmarks/tests -p 'test_*.py' -v
+```
 
 Warm results use 25 warm-ups followed by three blocks of 200 measurements.
 Mutating database workloads complete all four warm-up phases before the

@@ -21,7 +21,6 @@ services:
       - benchmark_postgres_data:/var/lib/postgresql/data
       - ./initdb:/docker-entrypoint-initdb.d:ro
       - ./sql:/benchmarks/sql:ro
-      - ./results:/benchmarks/results
     healthcheck:
       test:
         - CMD-SHELL

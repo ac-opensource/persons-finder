@@ -8,8 +8,12 @@ and GitHub timestamps share the same time basis.
 
 This evidence covers the corrected `GET /persons/nearby` response location and
 the loopback dashboard's dense-map and floating-detail behavior. It was
-executed against the current uncommitted `feature/person-dashboard` working
-tree and the existing isolated benchmark database.
+executed against the then-current dashboard implementation on
+`feature/person-dashboard` and the existing isolated benchmark database. That
+implementation was later squash-merged through
+[PR #10](https://github.com/ac-opensource/persons-finder/pull/10) as commit
+`2f5a7c29835d30d0ec946dafce6128b457701c5d`; the smoke predates that squash
+commit and remains scoped to the execution state described here.
 
 No `POST` or `PUT` request was made during this verification.
 

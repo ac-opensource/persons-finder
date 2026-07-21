@@ -13,6 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from validate_raw import RawRunValidationError, validate_completed_run
+
 
 @dataclass(frozen=True)
 class Sample:
@@ -136,16 +138,14 @@ def main() -> int:
     parser.add_argument("--run-dir", required=True, type=Path)
     args = parser.parse_args()
 
-    manifest_path = args.run_dir / "manifest.json"
-    if not manifest_path.exists():
-        raise SystemExit("raw run manifest is missing; refusing to summarize")
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    if manifest.get("phase") != "run" or manifest.get("completed") is not True:
-        raise SystemExit("raw run is incomplete; refusing to summarize")
+    try:
+        manifest, _completeness = validate_completed_run(args.run_dir)
+    except RawRunValidationError as error:
+        raise SystemExit(
+            f"raw benchmark evidence is incomplete; refusing to summarize: {error}"
+        ) from error
 
     cardinalities_path = args.run_dir / "cardinalities.csv"
-    if not cardinalities_path.exists():
-        raise SystemExit("raw cardinalities are missing; refusing to summarize")
     output_path = args.run_dir / "summary.md"
     if output_path.exists():
         raise SystemExit(f"summary already exists: {output_path}")
