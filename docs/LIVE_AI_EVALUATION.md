@@ -29,18 +29,29 @@ billable task. It is not wired into the PR workflow.
 
 ## Data and request boundary
 
-The versioned corpus is
-`src/test/resources/live-ai/bio-cases-v1.json`. It contains only:
+The current versioned corpus is
+`src/test/resources/live-ai/bio-cases-v2.json`. The immutable v1 corpus remains
+tracked only so the historical paid reports can be tied back to their exact
+input bytes and hash. The v2 corpus contains only:
 
 - opaque case IDs;
 - fixed structural slice IDs;
 - closed `SafeJobCode` values; and
-- closed, nonempty `SafeInterestCode` lists.
+- closed, nonempty `SafeInterestCode` lists; and
+- an integer hobby count from 1 through 10, which determines the exact indexed
+  placeholder set without containing any hobby value.
 
-The corpus contains no names, raw job titles, hobbies, places, coordinates,
+The twelve v2 cases retain the fixed 300-call budget at 25 repetitions. Ten
+cases request one hobby slot, the multi-interest case requests three, and the
+both-`other` case requests all ten. A complete run therefore exercises the
+three-slot and ten-slot contracts 25 times each while keeping category coverage
+and weighting explicit.
+
+The corpus contains no names, raw job titles, hobby values, places, coordinates,
 identifiers, credentials, prompts, or provider responses. Its loader rejects
-unknown fields, duplicate JSON keys, duplicate codes, invalid slices, and
-incomplete safe-code coverage before any network authorization.
+unknown fields, duplicate JSON keys, duplicate codes, invalid slices, missing
+or out-of-range hobby counts, missing maximum-count coverage, and incomplete
+safe-code coverage before any network authorization.
 
 Before each provider invocation, the evaluator independently checks the
 application-owned input allowlist and the prompt, schema, and output-token
@@ -252,7 +263,7 @@ execution/evidence extension, it contains:
 - the application-owned maximum output-token setting;
 - the 512 model-authored, 760 maximum-source, and 1,272 final-grounded
   code-point limits;
-- the explicit `indexed_hobbies_source_bound_v3` grounding strategy;
+- the explicit `indexed_hobbies_case_matched_source_bound_v4` grounding strategy;
 - pacing strategy and configured minimum call interval in provenance;
 - configured minimum first-to-last attempt-start span in provenance;
 - pacing wait-event count and actual wait nanoseconds in a top-level `pacing`
@@ -290,7 +301,11 @@ execution/evidence extension, it contains:
 The two historical schema-version-4 aggregate checkpoints were not backfilled
 and did not contain grounded-length fields; absence means unknown, not zero.
 Schema version 5 added the already required composition measurement against
-synthetic strings at the maximum approved source lengths. Version 6 adds
+synthetic strings at the maximum approved source lengths. The current runner
+uses each v2 case's explicit hobby count for both provider-request construction
+and matching maximum-length synthetic grounding, so the ten-slot case actually
+measures the full 760-point source allowance rather than merely reporting it.
+Version 6 adds
 one-based round/slot evidence, opaque output-equivalence classes, and
 per-round aggregates. These are structural worst-case measurements, not
 customer profile lengths.

@@ -13,6 +13,7 @@ internal data class BioEvalCase(
     val slices: Set<String>,
     val jobCategory: SafeJobCode,
     val interests: List<SafeInterestCode>,
+    val hobbyCount: Int,
 ) {
     init {
         require(ID_PATTERN.matches(id)) { "Evaluation case id is invalid" }
@@ -21,6 +22,9 @@ internal data class BioEvalCase(
         require(interests.isNotEmpty()) { "Evaluation case must have at least one interest" }
         require(interests.distinct() == interests) {
             "Evaluation case interests must be unique and ordered"
+        }
+        require(hobbyCount in 1..BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS) {
+            "Evaluation case hobby count is outside the supported range"
         }
         require(slices == expectedSlices()) {
             "Evaluation case slices must match its typed structure"
@@ -31,18 +35,26 @@ internal data class BioEvalCase(
         BioTemplateRequest(
             jobCategory = jobCategory,
             interests = interests,
+            hobbyCount = hobbyCount,
         )
 
     companion object {
         private val ID_PATTERN = Regex("case-[0-9]{3}")
         private val SLICE_PATTERN =
-            Regex("(?:job-coverage|single-interest|multi-interest|both-other)")
+            Regex(
+                "(?:job-coverage|single-interest|multi-interest|" +
+                    "single-hobby|multi-hobby|maximum-hobbies|both-other)",
+            )
     }
 
     private fun expectedSlices(): Set<String> =
         buildSet {
             add("job-coverage")
             add(if (interests.size == 1) "single-interest" else "multi-interest")
+            add(if (hobbyCount == 1) "single-hobby" else "multi-hobby")
+            if (hobbyCount == BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS) {
+                add("maximum-hobbies")
+            }
             if (
                 jobCategory == SafeJobCode.OTHER &&
                 interests == listOf(SafeInterestCode.OTHER)
@@ -90,17 +102,27 @@ internal data class BioEvalCorpus(
         require(cases.any { testCase -> testCase.interests.size > 1 }) {
             "Evaluation corpus must contain a multi-interest case"
         }
+        require(cases.any { testCase -> testCase.hobbyCount > 1 }) {
+            "Evaluation corpus must contain a multi-hobby case"
+        }
+        require(
+            cases.any { testCase ->
+                testCase.hobbyCount == BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS
+            },
+        ) {
+            "Evaluation corpus must contain a maximum-hobby-count case"
+        }
     }
 
     companion object {
-        internal const val SUPPORTED_SCHEMA_VERSION = 1
-        private const val CORPUS_ID = "bio-cases-v1"
+        internal const val SUPPORTED_SCHEMA_VERSION = 2
+        private const val CORPUS_ID = "bio-cases-v2"
         private val SHA_256_PATTERN = Regex("[a-f0-9]{64}")
     }
 }
 
 internal object BioEvalCorpusLoader {
-    const val DEFAULT_RESOURCE = "live-ai/bio-cases-v1.json"
+    const val DEFAULT_RESOURCE = "live-ai/bio-cases-v2.json"
 
     fun load(
         resourceName: String = DEFAULT_RESOURCE,
@@ -161,7 +183,8 @@ internal object BioEvalCorpusLoader {
         val path = "root.cases[$index]"
         node.requireObject(
             path = path,
-            expectedFields = setOf("id", "slices", "job_category", "interests"),
+            expectedFields =
+                setOf("id", "slices", "job_category", "interests", "hobby_count"),
         )
 
         val jobWireValue = node.requiredText("job_category", path)
@@ -188,6 +211,7 @@ internal object BioEvalCorpusLoader {
             slices = slices.toSet(),
             jobCategory = job,
             interests = interests,
+            hobbyCount = node.requiredInt("hobby_count", path),
         )
     }
 
@@ -229,6 +253,17 @@ internal object BioEvalCorpusLoader {
                     "$path.$fieldName[$index] must be a nonblank string",
                 )
         }
+    }
+
+    private fun JsonNode.requiredInt(
+        fieldName: String,
+        path: String,
+    ): Int {
+        val value = get(fieldName)
+        require(value != null && value.isIntegralNumber && value.canConvertToInt()) {
+            "$path.$fieldName must be an integer"
+        }
+        return value.intValue()
     }
 }
 
