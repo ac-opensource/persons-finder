@@ -23,8 +23,8 @@ class LiveBioEvalRunnerTest {
         var calls = 0
         var ticker = 0L
         val generator =
-            BioGenerator {
-                val prose = validatedProse("variant-$calls")
+            BioGenerator { request ->
+                val prose = validatedProse("variant-$calls", request.hobbyCount)
                 calls++
                 BioGenerationResult.Template(prose)
             }
@@ -50,11 +50,11 @@ class LiveBioEvalRunnerTest {
         assertEquals(24, report.provenance.plannedCalls)
         assertEquals(1_024, report.provenance.maxOutputTokens)
         assertEquals(512, report.provenance.modelAuthoredCodePointLimit)
-        assertEquals(220, report.provenance.maximumGroundingSourceCodePoints)
-        assertEquals(732, report.provenance.finalGroundedCodePointLimit)
+        assertEquals(760, report.provenance.maximumGroundingSourceCodePoints)
+        assertEquals(1_272, report.provenance.finalGroundedCodePointLimit)
         assertEquals(15_000L, report.provenance.generationDeadlineMillis)
         assertEquals(
-            "maximum_approved_source_lengths_v1",
+            "indexed_hobbies_case_matched_source_bound_v4",
             report.provenance.groundingStrategy,
         )
         assertEquals("minimum_attempt_start_interval_v1", report.provenance.pacingStrategy)
@@ -66,7 +66,12 @@ class LiveBioEvalRunnerTest {
         assertEquals(24, report.overall.distinctValidProseCount)
         assertEquals(0, report.overall.deterministicCatalogMatchCount)
         assertEquals(24, report.overall.finalGroundedSizeReportedCount)
-        assertEquals(252, report.overall.maximumFinalGroundedCodePoints)
+        assertEquals(
+            report.byCase.getValue("case-012").maximumFinalGroundedCodePoints,
+            report.overall.maximumFinalGroundedCodePoints,
+        )
+        assertTrue(report.overall.maximumFinalGroundedCodePoints > 760)
+        assertTrue(report.overall.maximumFinalGroundedCodePoints <= 1_272)
         assertEquals(0, report.overall.validResultsWithoutGroundedMeasurement)
         assertEquals(0, report.overall.failureCount)
         assertEquals(0.0, report.overall.observedFailureRate)
@@ -80,7 +85,15 @@ class LiveBioEvalRunnerTest {
             report.overall.latency,
         )
         assertEquals(
-            setOf("both-other", "job-coverage", "multi-interest", "single-interest"),
+            setOf(
+                "both-other",
+                "job-coverage",
+                "maximum-hobbies",
+                "multi-hobby",
+                "multi-interest",
+                "single-hobby",
+                "single-interest",
+            ),
             report.bySlice.keys,
         )
         assertEquals(
@@ -124,10 +137,10 @@ class LiveBioEvalRunnerTest {
         val time = FakeMonotonicTime()
         val attemptStarts = mutableListOf<Long>()
         val generator =
-            BioGenerator {
+            BioGenerator { request ->
                 attemptStarts += time.nowNanos
                 time.advance(Duration.ofSeconds(1))
-                BioGenerationResult.Template(validatedProse("paced"))
+                BioGenerationResult.Template(validatedProse("paced", request.hobbyCount))
             }
         val runner =
             LiveBioEvalRunner(
@@ -195,11 +208,11 @@ class LiveBioEvalRunnerTest {
         assertEquals(6_000L, sanitizedProvenance["minimum_call_interval_millis"])
         assertEquals(1_024, sanitizedProvenance["max_output_tokens"])
         assertEquals(512, sanitizedProvenance["model_authored_code_point_limit"])
-        assertEquals(220, sanitizedProvenance["maximum_grounding_source_code_points"])
-        assertEquals(732, sanitizedProvenance["final_grounded_code_point_limit"])
+        assertEquals(760, sanitizedProvenance["maximum_grounding_source_code_points"])
+        assertEquals(1_272, sanitizedProvenance["final_grounded_code_point_limit"])
         assertEquals(15_000L, sanitizedProvenance["generation_deadline_millis"])
         assertEquals(
-            "maximum_approved_source_lengths_v1",
+            "indexed_hobbies_case_matched_source_bound_v4",
             sanitizedProvenance["grounding_strategy"],
         )
         assertEquals(
@@ -250,7 +263,15 @@ class LiveBioEvalRunnerTest {
     fun `runner assigns stable first-seen output equivalence ids without prose hashes`() {
         val first = validatedProse("equivalence-alpha")
         val second = validatedProse("equivalence-beta")
-        val outputs = listOf(first, first, second, first, second, second)
+        val labels =
+            listOf(
+                "equivalence-alpha",
+                "equivalence-alpha",
+                "equivalence-beta",
+                "equivalence-alpha",
+                "equivalence-beta",
+                "equivalence-beta",
+            )
         var calls = 0
         val report =
             LiveBioEvalRunner(
@@ -260,18 +281,21 @@ class LiveBioEvalRunnerTest {
                 corpus = corpus,
                 configuration = configuration(repetitions = 1, maxCalls = 12),
                 generator =
-                    BioGenerator {
-                        BioGenerationResult.Template(outputs[calls++ % outputs.size])
+                    BioGenerator { request ->
+                        val label = labels[calls++ % labels.size]
+                        BioGenerationResult.Template(
+                            validatedProse(label, request.hobbyCount),
+                        )
                     },
             )
 
-        assertEquals(2, report.overall.distinctValidProseCount)
+        assertEquals(4, report.overall.distinctValidProseCount)
         assertEquals(
             listOf(
                 "output-001",
                 "output-001",
                 "output-002",
-                "output-001",
+                "output-003",
                 "output-002",
                 "output-002",
                 "output-001",
@@ -279,7 +303,7 @@ class LiveBioEvalRunnerTest {
                 "output-002",
                 "output-001",
                 "output-002",
-                "output-002",
+                "output-004",
             ),
             report.attemptEvidence.map(BioEvalAttemptEvidence::outputEquivalenceId),
         )
@@ -301,10 +325,12 @@ class LiveBioEvalRunnerTest {
                 corpus = corpus,
                 configuration = configuration(repetitions = 2, maxCalls = 24),
                 generator =
-                    BioGenerator {
+                    BioGenerator { request ->
                         calls++
                         if (calls <= corpus.cases.size) {
-                            BioGenerationResult.Template(validatedProse("round-one"))
+                            BioGenerationResult.Template(
+                                validatedProse("round-one", request.hobbyCount),
+                            )
                         } else {
                             BioGenerationResult.Failure(BioGenerationFailure.TIMEOUT)
                         }
@@ -334,9 +360,11 @@ class LiveBioEvalRunnerTest {
                 corpus = corpus,
                 configuration = configuration(repetitions = 25, maxCalls = 300),
                 generator =
-                    BioGenerator {
+                    BioGenerator { request ->
                         calls++
-                        BioGenerationResult.Template(validatedProse("repeated"))
+                        BioGenerationResult.Template(
+                            validatedProse("repeated", request.hobbyCount),
+                        )
                     },
             )
 
@@ -350,7 +378,7 @@ class LiveBioEvalRunnerTest {
             report.attemptEvidence.takeLast(12).map(BioEvalAttemptEvidence::caseId),
         )
         assertEquals(
-            setOf("output-001"),
+            setOf("output-001", "output-002", "output-003"),
             report.attemptEvidence.mapNotNull(
                 BioEvalAttemptEvidence::outputEquivalenceId,
             ).toSet(),
@@ -369,10 +397,12 @@ class LiveBioEvalRunnerTest {
             )
         var calls = 0
         val generator =
-            BioGenerator {
+            BioGenerator { request ->
                 val result =
                     sequence.getOrElse(calls) {
-                        BioGenerationResult.Template(validatedProse("fallback-$calls"))
+                        BioGenerationResult.Template(
+                            validatedProse("fallback-$calls", request.hobbyCount),
+                        )
                     }
                 calls++
                 result
@@ -469,12 +499,14 @@ class LiveBioEvalRunnerTest {
         val providerCancellation =
             CancellationException("RAW-SECRET-CANCELLATION-CONTENT")
         val generator =
-            BioGenerator {
+            BioGenerator { request ->
                 calls++
                 if (calls == 4) {
                     throw providerCancellation
                 }
-                BioGenerationResult.Template(validatedProse("checkpoint-$calls"))
+                BioGenerationResult.Template(
+                    validatedProse("checkpoint-$calls", request.hobbyCount),
+                )
             }
 
         val cancellation =
@@ -528,9 +560,9 @@ class LiveBioEvalRunnerTest {
         var calls = 0
         var sleeps = 0
         val generator =
-            BioGenerator {
+            BioGenerator { request ->
                 calls++
-                BioGenerationResult.Template(validatedProse("budget"))
+                BioGenerationResult.Template(validatedProse("budget", request.hobbyCount))
             }
         val runner =
             LiveBioEvalRunner(
@@ -550,10 +582,13 @@ class LiveBioEvalRunnerTest {
             )
         assertEquals(24, plan.plannedCalls)
         assertEquals(512, plan.modelAuthoredCodePointLimit)
-        assertEquals(220, plan.maximumGroundingSourceCodePoints)
-        assertEquals(732, plan.finalGroundedCodePointLimit)
+        assertEquals(760, plan.maximumGroundingSourceCodePoints)
+        assertEquals(1_272, plan.finalGroundedCodePointLimit)
         assertEquals(15_000L, plan.generationDeadlineMillis)
-        assertEquals("maximum_approved_source_lengths_v1", plan.groundingStrategy)
+        assertEquals(
+            "indexed_hobbies_case_matched_source_bound_v4",
+            plan.groundingStrategy,
+        )
         assertEquals("minimum_attempt_start_interval_v1", plan.pacingStrategy)
         assertEquals(6_000L, plan.minimumCallIntervalMillis)
         assertEquals(138_000L, plan.configuredMinimumCallStartSpanMillis)
@@ -578,15 +613,20 @@ class LiveBioEvalRunnerTest {
 
     @Test
     fun `novel valid prose and unexpected exceptions are aggregated without raw content`() {
-        val novelProse = validatedProse("novel")
         var calls = 0
         val generator =
-            BioGenerator {
+            BioGenerator { request ->
                 calls++
                 when (calls) {
-                    1 -> BioGenerationResult.Template(novelProse)
+                    1 ->
+                        BioGenerationResult.Template(
+                            validatedProse("novel", request.hobbyCount),
+                        )
                     2 -> error("RAW-SECRET-PROVIDER-CONTENT")
-                    else -> BioGenerationResult.Template(validatedProse("unused"))
+                    else ->
+                        BioGenerationResult.Template(
+                            validatedProse("unused", request.hobbyCount),
+                        )
                 }
             }
 
@@ -661,8 +701,10 @@ class LiveBioEvalRunnerTest {
                 corpus = corpus,
                 configuration = configuration(repetitions = 1, maxCalls = 12),
                 generator =
-                    BioGenerator {
-                        BioGenerationResult.Template(validatedProse("canonical"))
+                    BioGenerator { request ->
+                        BioGenerationResult.Template(
+                            validatedProse("canonical", request.hobbyCount),
+                        )
                     },
             )
         assertThrows<IllegalArgumentException> {
@@ -697,11 +739,19 @@ class LiveBioEvalRunnerTest {
         }
     }
 
-    private fun validatedProse(label: String): GeneratedBioTemplate =
+    private fun validatedProse(
+        label: String,
+        hobbyCount: Int = 1,
+    ): GeneratedBioTemplate =
         when (
             val result =
                 GeneratedBioTemplate.validate(
-                    "{{NAME}} makes {{HOBBY}} quirky $label as a {{JOB}}.",
+                    "{{NAME}} makes " +
+                        (0 until hobbyCount).joinToString("; ") { index ->
+                            "{{HOBBY[$index]}}"
+                        } +
+                        " quirky $label as a {{JOB}}.",
+                    hobbyCount,
                 )
         ) {
             is BioGenerationResult.Template -> result.value

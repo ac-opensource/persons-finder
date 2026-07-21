@@ -147,8 +147,8 @@ class LiveBioEvalMarkdownReportTest {
                         minimumCallInterval = Duration.ZERO,
                     ),
                 generator =
-                    BioGenerator {
-                        BioGenerationResult.Template(validTemplate())
+                    BioGenerator { request ->
+                        BioGenerationResult.Template(validTemplate(request.hobbyCount))
                     },
             )
         val requests =
@@ -269,11 +269,16 @@ class LiveBioEvalMarkdownReportTest {
         }
     }
 
-    private fun validTemplate(): GeneratedBioTemplate =
+    private fun validTemplate(hobbyCount: Int): GeneratedBioTemplate =
         when (
             val result =
                 GeneratedBioTemplate.validate(
-                    "{{NAME}} makes {{HOBBY}} delightfully quirky as a {{JOB}}.",
+                    "{{NAME}} makes " +
+                        (0 until hobbyCount).joinToString("; ") { index ->
+                            "{{HOBBY[$index]}}"
+                        } +
+                        " delightfully quirky as a {{JOB}}.",
+                    hobbyCount,
                 )
         ) {
             is BioGenerationResult.Template -> result.value

@@ -87,7 +87,7 @@ val testSourceSet = sourceSets["test"]
 
 tasks.register<Test>("liveAiSmoke") {
 	group = "verification"
-	description = "Runs exactly one selected provider's explicit three-call live AI smoke"
+	description = "Runs exactly one selected provider's explicit five-call live AI smoke"
 	testClassesDirs = testSourceSet.output.classesDirs
 	classpath = testSourceSet.runtimeClasspath
 	filter {

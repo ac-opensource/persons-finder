@@ -1,6 +1,9 @@
 package com.persons.finder.person.bio.remote.eval
 
 import com.persons.finder.person.bio.BioGenerationFailure
+import com.persons.finder.person.bio.BioTemplateRequest
+import com.persons.finder.person.bio.SafeInterestCode
+import com.persons.finder.person.bio.SafeJobCode
 import com.persons.finder.person.bio.remote.ModelGenerationRequest
 import com.persons.finder.person.bio.remote.ModelProviderClient
 import com.persons.finder.person.bio.remote.ModelProviderResult
@@ -23,6 +26,23 @@ class LiveBioEvalBoundaryTest {
             objectMapper,
             corpus.cases.first().toRequest(),
         )
+
+    @Test
+    fun `application request fingerprint supports the maximum indexed hobby count`() {
+        val maximumFingerprint =
+            captureApplicationRequestFingerprint(
+                objectMapper,
+                BioTemplateRequest(
+                    jobCategory = SafeJobCode.OTHER,
+                    interests = listOf(SafeInterestCode.OTHER),
+                    hobbyCount = BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS,
+                ),
+            )
+
+        assertEquals(fingerprint.promptSha256, maximumFingerprint.promptSha256)
+        assertEquals(fingerprint.outputSchemaSha256, maximumFingerprint.outputSchemaSha256)
+        assertEquals(fingerprint.maxOutputTokens, maximumFingerprint.maxOutputTokens)
+    }
 
     @Test
     fun `application request inspector derives fingerprints and blocks mutation before delegation`() {
@@ -331,6 +351,6 @@ class LiveBioEvalBoundaryTest {
 
     private companion object {
         const val VALID_PROSE_OUTPUT =
-            """{"bio_template":"{{NAME}} turns {{HOBBY}} into a quirky side quest after work as a {{JOB}}."}"""
+            """{"bio_template":"{{NAME}} turns {{HOBBY[0]}} into a quirky side quest after work as a {{JOB}}."}"""
     }
 }

@@ -250,7 +250,8 @@ class RealPostgisPersistenceTest {
                 .andExpect(
                     jsonPath("$.bio")
                         .value(
-                            "Meet Andrew, a very quirky Software engineer who enjoys tramping.",
+                            "Meet Andrew, a very quirky Software engineer: " +
+                                "tramping opens the side quest; pottery adds the plot twist.",
                         ),
                 )
                 .andExpect(jsonPath("$.location").doesNotExist())
@@ -504,7 +505,7 @@ class RealPostgisPersistenceTest {
                 bioGenerator =
                     BioGenerator {
                         GeneratedBioTemplate.validate(
-                            "{{NAME}}{{JOB}}{{HOBBY}}" +
+                            "{{NAME}}{{JOB}}{{HOBBY[0]}}" +
                                 "x".repeat(BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS) +
                                 ".",
                         )

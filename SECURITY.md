@@ -37,7 +37,9 @@ application-owned `BioTemplateRequest`. Its outbound allowlist contains only:
 
 - literal `{{NAME}}`, locale `en-NZ`, country `NZ`, and tone `quirky`;
 - one broad job-category code and mapping version; and
-- nonempty, deduplicated broad interest codes and their mapping version.
+- nonempty, deduplicated broad interest codes and their mapping version; and
+- a contiguous application-owned indexed hobby-placeholder list whose length
+  reveals only the accepted canonical hobby count, not any hobby value.
 
 The optional macro-region field is disabled by default. Raw names, job titles,
 employers, hobbies, places, coordinates, person or observation identifiers,
@@ -49,14 +51,15 @@ The remote clients request a JSON object containing only `bio_template`. The
 application rejects an oversized response, malformed JSON, duplicate keys,
 trailing content, extra fields, non-string values, and prose outside the
 deterministic template contract. OpenAI additionally receives a strict string
-pattern that permits each of the six possible orders of the three required
-placeholders while requiring each placeholder exactly once. This provider-side
+pattern that permits only approved placeholder syntax. This provider-side
 constraint reduces invalid generations; the provider-neutral application
-validator remains authoritative. The calibrated request allows up to 256
+validator remains authoritative for the exact required index set and
+cardinality. The calibrated request allows up to 256
 provider output tokens. Accepted prose must:
 
 - contain one to three sentences;
-- contain exactly one `{{NAME}}`, `{{JOB}}`, and `{{HOBBY}}`;
+- contain exactly one `{{NAME}}`, `{{JOB}}`, and every contiguous indexed hobby
+  placeholder from `{{HOBBY[0]}}` through the request's last index;
 - contain no unknown placeholder or forbidden region;
 - contain no standalone model-authored `prompt`, `prompts`, `instruction`, or
   `instructions` meta-language; word boundaries preserve benign words such as
@@ -65,9 +68,11 @@ provider output tokens. Accepted prose must:
 - stay within 512 non-placeholder Unicode code points.
 
 A trusted one-pass composer then inserts the validated local name, job title,
-and selected original hobby as opaque values. It checks exact grounding and a
-final 732-code-point limit: the 512-point prose allowance plus the existing
-220-point maximum for the selected local values. These limits retain substantial
+and every canonical original hobby as opaque values. Stable indices bind
+hobbies to first-input order while the model can arrange their slots and write
+separate creative beats between them. It checks exact grounding and a final
+1,272-code-point limit: the 512-point prose allowance plus the 760-point maximum
+for the local values. These limits retain substantial
 headroom over the paid calibration maxima without relaxing the sentence,
 placeholder, character, policy, or grounding checks. The model-authored
 meta-language policy is applied before composition, so matching words in opaque

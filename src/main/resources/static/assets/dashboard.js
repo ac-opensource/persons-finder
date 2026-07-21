@@ -12,7 +12,7 @@
     const NEARBY_LIST_PAGE_SIZE = 250;
     const NEARBY_MARKER_BATCH_SIZE = 500;
     const MAX_SESSION_PEOPLE = 500;
-    const MAX_BIO_CODE_POINTS = 732;
+    const MAX_BIO_CODE_POINTS = 1272;
     const TILE_URL = "https://tile.openstreetmap.org/{z}/{x}/{y}.png";
     const TILE_ATTRIBUTION =
         '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors';

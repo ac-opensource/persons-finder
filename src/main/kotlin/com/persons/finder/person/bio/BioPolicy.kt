@@ -6,21 +6,7 @@ import java.util.Locale
 
 class BioPolicy {
     fun prepare(profile: PersonProfile): PreparedBioRequest {
-        val mappedHobbies =
-            profile.hobbies.map { hobby ->
-                MappedHobby(
-                    original = hobby,
-                    code =
-                        ReviewedBioAliases.interests[hobby.aliasKey()]
-                            ?: SafeInterestCode.OTHER,
-                    hasReviewedAlias =
-                        ReviewedBioAliases.interests.containsKey(hobby.aliasKey()),
-                )
-            }
-        val selectedHobby =
-            mappedHobbies.firstOrNull(MappedHobby::hasReviewedAlias)?.original
-                ?: mappedHobbies.first().original
-        requireCompositionFits(profile, selectedHobby)
+        requireCompositionFits(profile)
 
         val sourceValues = sourceValuesForInspection(profile)
         if (
@@ -30,7 +16,12 @@ class BioPolicy {
             throw UnsafeBioInputException()
         }
 
-        val interests = mappedHobbies.map(MappedHobby::code).distinct()
+        val interests =
+            profile.hobbies
+                .map { hobby ->
+                    ReviewedBioAliases.interests[hobby.aliasKey()]
+                        ?: SafeInterestCode.OTHER
+                }.distinct()
         return PreparedBioRequest(
             request =
                 BioTemplateRequest(
@@ -38,55 +29,46 @@ class BioPolicy {
                         ReviewedBioAliases.jobs[profile.jobTitle.aliasKey()]
                             ?: SafeJobCode.OTHER,
                     interests = interests,
+                    hobbyCount = profile.hobbies.size,
                 ),
-            selectedHobby = selectedHobby,
         )
     }
 
     fun compose(
         template: GeneratedBioTemplate,
         profile: PersonProfile,
-        selectedHobby: String,
-    ): GeneratedBio = GeneratedBio.compose(template, profile, selectedHobby)
+    ): GeneratedBio = GeneratedBio.compose(template, profile)
 
-    private fun requireCompositionFits(
-        profile: PersonProfile,
-        selectedHobby: String,
-    ) {
-        if (selectedHobby !in profile.hobbies) {
-            throw BioCompositionDoesNotFitException()
-        }
-        val selectedSourceCodePoints =
+    private fun requireCompositionFits(profile: PersonProfile) {
+        val groundedSourceCodePoints =
             profile.name.codePointCount(0, profile.name.length) +
                 profile.jobTitle.codePointCount(0, profile.jobTitle.length) +
-                selectedHobby.codePointCount(0, selectedHobby.length)
-        if (selectedSourceCodePoints > MAX_SELECTED_SOURCE_CODE_POINTS) {
+                profile.hobbies.sumOf { hobby -> hobby.codePointCount(0, hobby.length) }
+        if (groundedSourceCodePoints > MAX_GROUNDED_SOURCE_CODE_POINTS) {
             throw BioCompositionDoesNotFitException()
         }
     }
 
     companion object {
-        const val FINAL_BIO_MAX_CODE_POINTS = 732
         const val MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS = 512
-        const val MAX_SELECTED_SOURCE_CODE_POINTS =
-            FINAL_BIO_MAX_CODE_POINTS - MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS
+        const val MAX_GROUNDED_HOBBIES_CODE_POINTS =
+            PersonProfile.MAX_HOBBY_CODE_POINTS * PersonProfile.MAX_HOBBIES
+        const val MAX_GROUNDED_SOURCE_CODE_POINTS =
+            PersonProfile.MAX_NAME_CODE_POINTS +
+                PersonProfile.MAX_JOB_TITLE_CODE_POINTS +
+                MAX_GROUNDED_HOBBIES_CODE_POINTS
+        const val FINAL_BIO_MAX_CODE_POINTS =
+            MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS + MAX_GROUNDED_SOURCE_CODE_POINTS
     }
 }
 
 data class PreparedBioRequest(
     val request: BioTemplateRequest,
-    val selectedHobby: String,
 )
 
 class UnsafeBioInputException : RuntimeException()
 
 class BioCompositionDoesNotFitException : RuntimeException()
-
-private data class MappedHobby(
-    val original: String,
-    val code: SafeInterestCode,
-    val hasReviewedAlias: Boolean,
-)
 
 internal object ReviewedBioAliases {
     val jobs: Map<String, SafeJobCode> =

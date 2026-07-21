@@ -6,6 +6,7 @@ import com.persons.finder.person.bio.BioGenerationResult
 import com.persons.finder.person.bio.BioGenerator
 import com.persons.finder.person.bio.BioGrounding
 import com.persons.finder.person.bio.BioPolicy
+import com.persons.finder.person.bio.BioTemplateRequest
 import com.persons.finder.person.bio.BioTemplateId
 import com.persons.finder.person.bio.GeneratedBio
 import com.persons.finder.person.bio.GeneratedBioTemplate
@@ -132,7 +133,7 @@ internal class LiveBioEvalRunner(
             modelAuthoredCodePointLimit =
                 BioPolicy.MAXIMUM_BIO_TEMPLATE_LITERAL_CODE_POINTS,
             maximumGroundingSourceCodePoints =
-                BioPolicy.MAX_SELECTED_SOURCE_CODE_POINTS,
+                BioPolicy.MAX_GROUNDED_SOURCE_CODE_POINTS,
             finalGroundedCodePointLimit = BioPolicy.FINAL_BIO_MAX_CODE_POINTS,
             groundingStrategy = MAXIMUM_SYNTHETIC_GROUNDING_STRATEGY,
             generationDeadlineMillis = configuration.generationDeadline.toMillis(),
@@ -170,7 +171,10 @@ internal class LiveBioEvalRunner(
                 var cancellation: CancellationException? = null
                 val classified =
                     try {
-                        classify(generator.generate(testCase.toRequest()))
+                        classify(
+                            result = generator.generate(testCase.toRequest()),
+                            grounding = maximumSyntheticGrounding(testCase.hobbyCount),
+                        )
                     } catch (exception: CancellationException) {
                         cancellation = exception
                         ClassifiedResult(BioEvalOutcome.CANCELLED)
@@ -318,7 +322,10 @@ internal class LiveBioEvalRunner(
         )
     }
 
-    private fun classify(result: BioGenerationResult): ClassifiedResult =
+    private fun classify(
+        result: BioGenerationResult,
+        grounding: BioGrounding,
+    ): ClassifiedResult =
         when (result) {
             is BioGenerationResult.Failure ->
                 ClassifiedResult(result.reason.toEvalOutcome())
@@ -326,7 +333,10 @@ internal class LiveBioEvalRunner(
             is BioGenerationResult.Template -> {
                 val validatedTemplate =
                     (
-                        GeneratedBioTemplate.validate(result.value.value)
+                        GeneratedBioTemplate.validate(
+                            result.value.value,
+                            grounding.hobbies.size,
+                        )
                             as? BioGenerationResult.Template
                     )?.value
                 if (validatedTemplate != result.value) {
@@ -336,7 +346,7 @@ internal class LiveBioEvalRunner(
                         val grounded =
                             GeneratedBio.compose(
                                 validatedTemplate,
-                                MAXIMUM_SYNTHETIC_GROUNDING,
+                                grounding,
                             )
                         ClassifiedResult(
                             outcome = BioEvalOutcome.VALID_PROSE,
@@ -425,15 +435,26 @@ internal class LiveBioEvalRunner(
     private companion object {
         const val PACING_STRATEGY = "minimum_attempt_start_interval_v1"
         const val MAXIMUM_SYNTHETIC_GROUNDING_STRATEGY =
-            "maximum_approved_source_lengths_v1"
+            "indexed_hobbies_case_matched_source_bound_v4"
+        const val MAXIMUM_HOBBY_FILLERS = "ABCDEFGHIK"
 
         val DETERMINISTIC_CATALOG_TEMPLATES: Set<GeneratedBioTemplate> =
-            BioTemplateId.entries.mapTo(mutableSetOf(), GeneratedBioTemplate::fromCatalog)
-        val MAXIMUM_SYNTHETIC_GROUNDING =
+            (1..BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS)
+                .flatMap { hobbyCount ->
+                    BioTemplateId.entries.map { templateId ->
+                        GeneratedBioTemplate.fromCatalog(templateId, hobbyCount)
+                    }
+                }.toSet()
+
+        fun maximumSyntheticGrounding(hobbyCount: Int): BioGrounding =
             BioGrounding(
                 name = "N".repeat(PersonProfile.MAX_NAME_CODE_POINTS),
                 jobTitle = "J".repeat(PersonProfile.MAX_JOB_TITLE_CODE_POINTS),
-                hobby = "H".repeat(PersonProfile.MAX_HOBBY_CODE_POINTS),
+                hobbies =
+                    List(hobbyCount) { index ->
+                        MAXIMUM_HOBBY_FILLERS[index].toString()
+                            .repeat(PersonProfile.MAX_HOBBY_CODE_POINTS)
+                    },
             )
     }
 }

@@ -78,7 +78,13 @@ class CreatePersonService(
         val template =
             when (generated) {
                 is BioGenerationResult.Template ->
-                    when (val revalidated = GeneratedBioTemplate.validate(generated.value.value)) {
+                    when (
+                        val revalidated =
+                            GeneratedBioTemplate.validate(
+                                generated.value.value,
+                                command.profile.hobbies.size,
+                            )
+                    ) {
                         is BioGenerationResult.Template -> revalidated.value
                         is BioGenerationResult.Failure ->
                             return revalidated.reason.toCreateOutcome()
@@ -94,7 +100,7 @@ class CreatePersonService(
         }
         val bio =
             try {
-                bioPolicy.compose(template, command.profile, prepared.selectedHobby)
+                bioPolicy.compose(template, command.profile)
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: IllegalArgumentException) {

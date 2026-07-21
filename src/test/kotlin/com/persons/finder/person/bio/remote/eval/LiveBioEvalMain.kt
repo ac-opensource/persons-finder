@@ -626,7 +626,7 @@ internal fun requireApprovedOpenAiReliabilityProtocol(
         "The approved aggregate protocol requires the calibrated 512-code-point authored limit"
     }
     require(finalGroundedCodePointLimit == APPROVED_RELIABILITY_FINAL_GROUNDED_CODE_POINTS) {
-        "The approved aggregate protocol requires the calibrated 732-code-point final limit"
+        "The approved aggregate protocol requires the 1272-code-point indexed-hobbies final limit"
     }
     require(generationDeadline == APPROVED_RELIABILITY_GENERATION_DEADLINE) {
         "The approved aggregate protocol requires the evidence-backed 15-second deadline"
@@ -640,7 +640,7 @@ private const val APPROVED_RELIABILITY_MAX_CALLS = 300
 private const val APPROVED_RELIABILITY_FAILURE_UPPER_BOUND = 0.01
 private const val APPROVED_RELIABILITY_MAX_OUTPUT_TOKENS = 256
 private const val APPROVED_RELIABILITY_MODEL_AUTHORED_CODE_POINTS = 512
-private const val APPROVED_RELIABILITY_FINAL_GROUNDED_CODE_POINTS = 732
+private const val APPROVED_RELIABILITY_FINAL_GROUNDED_CODE_POINTS = 1_272
 private val APPROVED_RELIABILITY_GENERATION_DEADLINE = Duration.ofSeconds(15)
 
 internal data class LiveBioEvalRevision(
@@ -685,13 +685,17 @@ internal fun captureApplicationRequestFingerprint(
     request: BioTemplateRequest,
 ): ApplicationRequestFingerprint {
     var captured: ModelGenerationRequest? = null
+    val hobbyStory =
+        (0 until request.hobbyCount).joinToString("; ") { index ->
+            "{{HOBBY[$index]}} adds a quirky beat"
+        }
     val generator =
         RemoteBioGenerator(
             providerClient =
                 ModelProviderClient { providerRequest ->
                     captured = providerRequest
                     ModelProviderResult.Generated(
-                        """{"bio_template":"{{NAME}} turns {{HOBBY}} into a quirky side quest after work as a {{JOB}}."}""",
+                        """{"bio_template":"{{NAME}} is a quirky {{JOB}}: $hobbyStory."}""",
                     )
                 },
             objectMapper = objectMapper,

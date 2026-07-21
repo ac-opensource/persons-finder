@@ -38,6 +38,7 @@ class BioTemplateRequest(
     val jobCategory: SafeJobCode,
     val jobCategoryMappingVersion: String = JOB_MAPPING_VERSION,
     interests: List<SafeInterestCode>,
+    val hobbyCount: Int = 1,
     val interestCategoryMappingVersion: String = INTEREST_MAPPING_VERSION,
     val macroRegion: MacroRegion? = null,
     val tone: BioTone = BioTone.QUIRKY,
@@ -51,6 +52,7 @@ class BioTemplateRequest(
         require(jobCategoryMappingVersion == JOB_MAPPING_VERSION)
         require(interests.isNotEmpty())
         require(interests.distinct() == interests)
+        require(hobbyCount in 1..MAX_HOBBY_PLACEHOLDERS)
         require(interestCategoryMappingVersion == INTEREST_MAPPING_VERSION)
         require(tone == BioTone.QUIRKY)
     }
@@ -63,6 +65,7 @@ class BioTemplateRequest(
             jobCategory == other.jobCategory &&
             jobCategoryMappingVersion == other.jobCategoryMappingVersion &&
             interests == other.interests &&
+            hobbyCount == other.hobbyCount &&
             interestCategoryMappingVersion == other.interestCategoryMappingVersion &&
             macroRegion == other.macroRegion &&
             tone == other.tone
@@ -75,6 +78,7 @@ class BioTemplateRequest(
             jobCategory,
             jobCategoryMappingVersion,
             interests,
+            hobbyCount,
             interestCategoryMappingVersion,
             macroRegion,
             tone,
@@ -82,7 +86,8 @@ class BioTemplateRequest(
 
     override fun toString(): String =
         "BioTemplateRequest(" +
-            "interestCount=${interests.size}, macroRegionPresent=${macroRegion != null})"
+            "interestCount=${interests.size}, hobbyCount=$hobbyCount, " +
+            "macroRegionPresent=${macroRegion != null})"
 
     companion object {
         const val DISPLAY_NAME_TOKEN = "{{NAME}}"
@@ -90,7 +95,18 @@ class BioTemplateRequest(
         const val DEPLOYMENT_COUNTRY_CODE = "NZ"
         const val JOB_MAPPING_VERSION = "job-v1"
         const val INTEREST_MAPPING_VERSION = "interest-v1"
+        const val MAX_HOBBY_PLACEHOLDERS = 10
     }
+}
+
+internal fun hobbyPlaceholder(index: Int): String {
+    require(index in 0 until BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS)
+    return "{{HOBBY[$index]}}"
+}
+
+internal fun hobbyPlaceholders(count: Int): List<String> {
+    require(count in 1..BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS)
+    return List(count, ::hobbyPlaceholder)
 }
 
 enum class SafeJobCode(val wireValue: String) {

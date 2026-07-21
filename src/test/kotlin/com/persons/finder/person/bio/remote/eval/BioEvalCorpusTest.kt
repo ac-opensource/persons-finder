@@ -1,5 +1,6 @@
 package com.persons.finder.person.bio.remote.eval
 
+import com.persons.finder.person.bio.BioTemplateRequest
 import com.persons.finder.person.bio.SafeInterestCode
 import com.persons.finder.person.bio.SafeJobCode
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -12,8 +13,8 @@ class BioEvalCorpusTest {
     fun `versioned corpus covers every safe code and required shape`() {
         val corpus = BioEvalCorpusLoader.load()
 
-        assertEquals("bio-cases-v1", corpus.id)
-        assertEquals(1, corpus.schemaVersion)
+        assertEquals("bio-cases-v2", corpus.id)
+        assertEquals(2, corpus.schemaVersion)
         assertTrue(Regex("[a-f0-9]{64}").matches(corpus.sha256))
         assertEquals(
             SafeJobCode.entries.toSet(),
@@ -30,7 +31,23 @@ class BioEvalCorpusTest {
             },
         )
         assertTrue(corpus.cases.any { testCase -> testCase.interests.size > 1 })
-        assertTrue(corpus.cases.all { testCase -> testCase.toRequest().macroRegion == null })
+        assertEquals(
+            mapOf("case-004" to 3, "case-012" to 10),
+            corpus.cases
+                .filter { testCase -> testCase.hobbyCount > 1 }
+                .associate { testCase -> testCase.id to testCase.hobbyCount },
+        )
+        assertTrue(
+            corpus.cases.all { testCase ->
+                testCase.toRequest().macroRegion == null &&
+                    testCase.toRequest().hobbyCount == testCase.hobbyCount
+            },
+        )
+        assertTrue(
+            corpus.cases.single { testCase ->
+                testCase.hobbyCount == BioTemplateRequest.MAX_HOBBY_PLACEHOLDERS
+            }.slices.contains("maximum-hobbies"),
+        )
     }
 
     @Test
@@ -40,13 +57,14 @@ class BioEvalCorpusTest {
                 BioEvalCorpusLoader.parse(
                     """
                     {
-                      "corpus_id": "bio-cases-v1",
-                      "schema_version": 1,
+                      "corpus_id": "bio-cases-v2",
+                      "schema_version": 2,
                       "cases": [{
                         "id": "case-001",
-                        "slices": ["job-coverage"],
+                        "slices": ["job-coverage", "single-interest", "single-hobby"],
                         "job_category": "other",
                         "interests": ["other"],
+                        "hobby_count": 1,
                         "name": "raw-source-value"
                       }]
                     }
@@ -64,13 +82,14 @@ class BioEvalCorpusTest {
                 BioEvalCorpusLoader.parse(
                     """
                     {
-                      "corpus_id": "bio-cases-v1",
-                      "schema_version": 1,
+                      "corpus_id": "bio-cases-v2",
+                      "schema_version": 2,
                       "cases": [{
                         "id": "case-001",
-                        "slices": ["job-coverage", "single-interest", "both-other"],
+                        "slices": ["job-coverage", "single-interest", "single-hobby", "both-other"],
                         "job_category": "other",
-                        "interests": ["other"]
+                        "interests": ["other"],
+                        "hobby_count": 1
                       }]
                     }
                     """.trimIndent().toByteArray(),
@@ -87,13 +106,14 @@ class BioEvalCorpusTest {
                 BioEvalCorpusLoader.parse(
                     """
                     {
-                      "corpus_id": "bio-cases-v1",
-                      "schema_version": 1,
+                      "corpus_id": "bio-cases-v2",
+                      "schema_version": 2,
                       "cases": [{
                         "id": "case-001",
-                        "slices": ["job-coverage"],
+                        "slices": ["job-coverage", "single-interest", "single-hobby"],
                         "job_category": "freelance-wizard",
-                        "interests": ["other"]
+                        "interests": ["other"],
+                        "hobby_count": 1
                       }]
                     }
                     """.trimIndent().toByteArray(),
@@ -110,9 +130,9 @@ class BioEvalCorpusTest {
                 BioEvalCorpusLoader.parse(
                     """
                     {
-                      "corpus_id": "bio-cases-v1",
-                      "corpus_id": "bio-cases-v1",
-                      "schema_version": 1,
+                      "corpus_id": "bio-cases-v2",
+                      "corpus_id": "bio-cases-v2",
+                      "schema_version": 2,
                       "cases": []
                     }
                     """.trimIndent().toByteArray(),
@@ -134,6 +154,38 @@ class BioEvalCorpusTest {
                         SafeInterestCode.MUSIC,
                         SafeInterestCode.TRAVEL,
                     ),
+                hobbyCount = 2,
+            )
+        }
+    }
+
+    @Test
+    fun `corpus parser rejects missing malformed and out-of-range hobby counts`() {
+        listOf(null, "1.5", "0", "11").forEach { value ->
+            val hobbyCountField = value?.let { ", \"hobby_count\": $it" }.orEmpty()
+            val error =
+                assertThrows<IllegalArgumentException> {
+                    BioEvalCorpusLoader.parse(
+                        """
+                        {
+                          "corpus_id": "bio-cases-v2",
+                          "schema_version": 2,
+                          "cases": [{
+                            "id": "case-001",
+                            "slices": ["job-coverage", "single-interest", "single-hobby"],
+                            "job_category": "other",
+                            "interests": ["other"]$hobbyCountField
+                          }]
+                        }
+                        """.trimIndent().toByteArray(),
+                    )
+                }
+
+            assertTrue(
+                error.message.orEmpty().contains("approved typed fields") ||
+                    error.message.orEmpty().contains("hobby count") ||
+                    error.message.orEmpty().contains("must be an integer"),
+                error.message,
             )
         }
     }
