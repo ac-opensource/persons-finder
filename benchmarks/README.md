@@ -5,9 +5,11 @@ This harness benchmarks the production PostGIS nearby query against exactly
 projections. It is intentionally isolated from the normal development Compose
 project and database.
 
-No benchmark result is implied by these scripts. Raw output is written under
-`benchmarks/results/<run-id>/` only after commands execute. Do not add a
-`RESULTS.md` until that raw evidence exists.
+The scripts alone imply no result. The reviewed completed local run is
+published in [`RESULTS.md`](RESULTS.md); its ignored private raw evidence is
+under `benchmarks/results/<run-id>/`. A future source state requires its own
+fresh seed, complete run, validation, and review before it can replace that
+result.
 
 ## Requirements
 
@@ -95,6 +97,21 @@ These are predeclared targets, not measured results:
 High-cardinality uncapped results are reported as latency/cardinality curves.
 They are not forced under the selective-query threshold because serialization
 and transfer are required parts of the accepted API contract.
+
+## Published measured run
+
+[`RESULTS.md`](RESULTS.md) documents the completed
+`run-20260721T080716Z` measurement against
+`seed-20260721T080324Z`. The shared validator accepted all declared database,
+HTTP, throughput, baseline, history, write, snapshot, environment, oracle, and
+plan artifacts, and the raw-derived summarizer repeated that validation.
+
+The result passed the selective database/HTTP thresholds, measured a 132.8x
+indexed p95 improvement over the controlled unindexed baseline, verified exact
+zero-delta replay behavior, and captured five current plans. Its local
+high-cardinality curve identifies response cardinality/payload as the dominant
+end-to-end bottleneck at roughly 50,000 rows. It makes no production capacity,
+cold-cache, or cross-hardware claim.
 
 ## Isolation contract
 
