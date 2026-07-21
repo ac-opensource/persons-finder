@@ -416,12 +416,33 @@ moving a person changes the guarded seed. After any interactive use, run
 `reset` and `seed` again before measuring; do not use the dashboard during a
 measurement.
 
-> **Current measurement status:** the post-merge standard-input defect is
-> corrected: every Compose `exec` is non-interactive, and `run` now refuses to
-> mark the database or manifest completed unless the exact raw workload plan
-> passes an explicit completeness validator. No fresh measured run from the
-> corrected harness is checked in, so do not make a performance or capacity
-> claim until one is executed and reviewed.
+> **Current measured result:** `run-20260721T080716Z` completed against a fresh
+> passing one-million-person seed and passed the exact raw-workload validator.
+> The reviewed local arm64 result is published in
+> [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md). It is benchmark evidence,
+> not a production-capacity claim.
+
+Headline results from the completed local run:
+
+The HTTP figures are end-to-end `GET /persons/nearby` API measurements against
+the same seeded PostgreSQL database. Each sample includes real request parsing
+and validation, the production indexed repository query, JDBC row mapping,
+response construction, JSON serialization, and loopback HTTP transfer; these
+are not SQL-only or mocked-client measurements.
+
+| Measure | Result |
+| --- | ---: |
+| Selective nearby database, worst p95 / p99 (1-125 rows) | 2.154 / 3.263 ms |
+| End-to-end `GET /persons/nearby` API with database, worst p95 / p99 (1-125 rows) | 4.543 / 8.344 ms |
+| Controlled indexed vs unindexed p95 | 0.699 vs 92.812 ms (132.8x) |
+| `GET /persons/nearby` API throughput, 1-row response, concurrency 1 / 8 | 735.95 / 2,355.30 requests/s |
+| `GET /persons/nearby` API throughput, 50,001-row response, concurrency 1 / 8 | 2.17 / 4.30 requests/s |
+| Winning-append throughput retained vs late append | 85.3% |
+
+The 50,001-row `GET /persons/nearby` API response was about 19.9 MB with p95
+413.853 ms at concurrency 1. Response cardinality/payload is the principal
+measured high-cardinality bottleneck; see the result document for the
+database/HTTP curves, write deltas, five-plan set, environment, and limitations.
 
 The one-shot measurement entry point accepts only a fresh passing seed:
 
@@ -483,13 +504,16 @@ images:
 
 ### Current evidence boundary
 
-The checked-in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) contains
-seed-and-correctness evidence only. It contains no completed measured run,
-latency distribution, throughput result, indexed/unindexed comparison, current
-query-plan set, bottleneck conclusion, or production-capacity claim. A
-fresh run with explicit workload-completeness checks is required before any of
-those claims can be made. Until then, treat `benchmark run` as an
-evidence-generation entry point, not as a verified published result. See
+The checked-in [`benchmarks/RESULTS.md`](benchmarks/RESULTS.md) publishes one
+completed, workload-complete local measured run with latency distributions,
+throughput blocks, an indexed/unindexed comparison, exact write deltas, five
+current query plans, and a bounded bottleneck conclusion. The raw evidence is
+kept in ignored private result directories for local re-verification.
+
+The result does **not** establish production capacity, a cold-cache result,
+run-to-run variance, or behavior on other hardware. Treat `benchmark run` as
+the evidence-generation entry point for any future source state, and publish a
+new claim only after its own raw-completeness validation and review. See
 [`benchmarks/README.md`](benchmarks/README.md) for the hypotheses, raw layout,
 and interpretation rules.
 

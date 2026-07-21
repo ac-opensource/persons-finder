@@ -650,9 +650,14 @@ def parse_write_snapshot(path: Path) -> dict[str, Any]:
     if not re.fullmatch(r"[0-9A-Fa-f]+/[0-9A-Fa-f]+", row["current_wal_lsn"]):
         raise invalid(f"{path.name} has invalid current_wal_lsn")
     parsed["current_wal_lsn"] = row["current_wal_lsn"]
+    captured_at = re.sub(
+        r"([+-][0-9]{2})$",
+        r"\1:00",
+        row["captured_at"].replace("Z", "+00:00"),
+    )
     try:
         parsed["captured_at"] = dt.datetime.fromisoformat(
-            row["captured_at"].replace("Z", "+00:00")
+            captured_at
         )
     except ValueError as error:
         raise invalid(f"{path.name} has invalid captured_at") from error

@@ -1,218 +1,228 @@
 # One-million-person benchmark results
 
-## Status
+## Status and evidence identity
 
-This is an incomplete, seed-and-correctness-only result. The supplied raw
-artifacts contain no completed measured benchmark run and no query plans.
-Consequently, this document makes no database-latency, HTTP-latency,
-throughput, indexed-versus-unindexed, plan-shape, or production-capacity
-claim.
+This is a completed local measured run, not a production-capacity result. The
+shared validator accepted every declared workload and raw artifact before the
+run manifest was marked complete, and the raw-derived summarizer repeated that
+validation before producing its summary.
 
-Both completed raw manifests record:
-
-- application Git SHA:
-  `2a594887558f3f456290f2ec4d62ce691ae7c8a9`
-- benchmark source fingerprint:
-  `5002b19b5ec155b709e014ae6d25963a269f5b5c3cef27a0e14cb279a2310be1`
-
-The captured Git status says `benchmarks/` was untracked. The Git SHA therefore
-identifies the application source but does not independently identify or
-reproduce the benchmark harness. The source fingerprint is the available
-identity for the harness content used by the completed seeds.
-
-## Evidence analyzed
-
-Only these local raw directories were analyzed:
-
-| Raw directory | Classification | Reason |
-| --- | --- | --- |
-| `results/seed-20260720T153013Z/` | Invalid overall seed | The bulk seed stopped with `integer out of range`; it has no manifest, seed manifest, or full correctness output. |
-| `results/seed-20260720T153509Z/` | Valid for seed correctness only | It has a seed manifest and all correctness gates passed. It has no measured-run artifacts. |
-| `results/seed-20260720T154141Z/` | Valid for seed correctness only | It has a seed manifest and all correctness gates passed. It has no measured-run artifacts. |
-
-No `run-*` directory, `cardinalities.csv`, `database-environment.csv`, pgbench
-log, measured nearby HTTP log, measured write HTTP log, or `plans/` directory
-was supplied.
-
-## Measured facts
-
-### Dataset and winner correctness
-
-The two completed seeds reported identical deterministic counts and identity
-checksums. A later source audit found that their manifest's intended
-received-at cohort labels did not match the generated timestamps: the 40,000
-trails labelled as received-at tiebreaks tied on both timestamps and therefore
-also resolved by UUID. The table preserves the manifest values and records the
-corrected interpretation rather than retroactively treating the old seeds as
-evidence for a received-at tiebreak:
-
-| Measure | `seed-20260720T153509Z` | `seed-20260720T154141Z` |
-| --- | ---: | ---: |
-| Persons | 1,000,000 | 1,000,000 |
-| Observations | 5,000,000 | 5,000,000 |
-| Last-known projections | 1,000,000 | 1,000,000 |
-| Initial observations | 1,000,000 | 1,000,000 |
-| No-key observations | 1,000,000 | 1,000,000 |
-| Client-update observations | 3,000,000 | 3,000,000 |
-| Chronological trails | 750,000 | 750,000 |
-| Late-arrival trails | 200,000 | 200,000 |
-| Manifest-labelled received-at tiebreak trails | 40,000 | 40,000 |
-| Received-at tiebreak trails actually exercised | 0 | 0 |
-| Manifest-labelled UUID-tiebreak trails | 10,000 | 10,000 |
-| UUID-tiebreak trails actually exercised | 50,000 | 50,000 |
-| Deterministic identity checksum | `945806b90bcb4cf75bb94b2ccf656905` | `945806b90bcb4cf75bb94b2ccf656905` |
-
-The seed generator is corrected in the current source so slot 5 wins the
-40,000 equal-capture-time trails by `received_at`. That correction has not
-been reseeded in the supplied artifacts, so a fresh `reset` and `seed` is
-required before those cohort counts can be verified against the current
-implementation.
-
-The full winner/trail-depth check compared 1,000,000 production projection
-rows with 1,000,000 oracle rows in each completed seed. Both reported:
-
-- zero duplicate-person rows;
-- zero membership or distance mismatches;
-- zero ordering mismatches.
-
-Each completed seed also exercised 100 persons through the application
-transaction path. Each sample produced 500 observations and 100 projections
-with zero winner mismatches.
-
-### Nearby correctness and cardinality
-
-Both completed seeds produced the same result cardinalities. In every scenario,
-the production last-known-projection query and brute-force same-winner-rule
-oracle returned the same rows in the same order, with no duplicate person:
-
-| Scenario | Radius | Rows returned | Duplicate persons | Membership/distance mismatches | Ordering mismatches |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Dense Auckland | 0.1 km | 1 | 0 | 0 | 0 |
-| Dense Auckland | 1 km | 125 | 0 | 0 | 0 |
-| Dense Auckland | 5 km | 3,125 | 0 | 0 | 0 |
-| Dense Auckland | 20 km | 49,994 | 0 | 0 | 0 |
-| Dense Auckland | 100 km | 50,041 | 0 | 0 | 0 |
-| Global origin | 1 km | 0 | 0 | 0 | 0 |
-| Global origin | 20 km | 2 | 0 | 0 | 0 |
-| Global origin | 100 km | 42 | 0 | 0 | 0 |
-| Antimeridian | 20 km | 2 | 0 | 0 | 0 |
-| Antimeridian | 100 km | 43 | 0 | 0 | 0 |
-
-### Application-path diagnostic timing
-
-The seed process recorded elapsed time for its sequential 100-person
-application-path correctness sample. These requests had no declared warm-up,
-repeat blocks, concurrency control, or throughput interval. They are reported
-only as diagnostic timing and are excluded from the benchmark latency
-hypothesis.
-
-Percentiles below use the nearest-rank method. `CV` is population standard
-deviation divided by the mean.
-
-| Seed | Operation | Samples | p50 ms | p95 ms | p99 ms | Maximum ms | CV |
-| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `153509Z` | Create | 100 | 4.030 | 7.075 | 12.671 | 92.804 | 1.776 |
-| `153509Z` | Update | 400 | 3.537 | 6.408 | 13.851 | 45.116 | 0.766 |
-| `154141Z` | Create | 100 | 2.937 | 4.645 | 7.656 | 97.314 | 2.267 |
-| `154141Z` | Update | 400 | 2.749 | 4.256 | 5.036 | 18.385 | 0.347 |
-
-All 1,000 diagnostic requests across the two completed seeds returned the
-expected success status.
-
-### Captured environment
-
-Both completed seed snapshots reported the same environment:
-
-- macOS 26.4.1 on arm64;
-- 12 logical CPUs visible to the capture process;
-- Docker client 29.6.2;
-- Docker Engine 29.5.2 on Linux arm64 through the `colima` context;
-- Docker Compose 5.3.1;
-- Python 3.9.6.
-
-No container CPU limit, container memory limit, host memory, storage medium,
-PostgreSQL configuration, PostgreSQL/PostGIS version, table/index size, cache
-state, or database statistics snapshot was supplied.
-
-## Variance
-
-The deterministic dataset counts, identity checksum, winner correctness,
-nearby cardinalities, and mismatch counts had no observed variation between
-the two completed seeds.
-
-The application-path diagnostic timings did vary. The second seed had lower
-p50, p95, and p99 for both creates and updates, while its maximum create
-latency was slightly higher. Each sample's first create was approximately
-93-97 ms, far above its median. Because the sample was sequential and
-unwarmed, this is evidence of a first-request outlier, not evidence of a
-specific database or application bottleneck.
-
-There are no repeated measured database or core HTTP blocks from which to
-calculate benchmark run-to-run variance, confidence intervals, or throughput
-variance.
-
-## Query plans and bottlenecks
-
-No query-plan artifacts were supplied. Plan changes, index use, row-estimate
-quality, buffer activity, sort/spill behavior, latest-history access, and
-indexed-versus-brute-force execution therefore cannot be assessed.
-
-The failed `153013Z` seed identifies a correctness defect in that attempt:
-integer overflow occurred during dense-cluster generation after 700,000
-global seed locations had been inserted. It is an invalid run, not a measured
-performance bottleneck.
-
-The completed seed logs do not enable SQL timing, and no component timing or
-query plan accompanies the application-path outliers. The supplied evidence
-does not support attributing a bottleneck to PostgreSQL, PostGIS, the
-application, serialization, networking, or container resources.
-
-## Interpretation
-
-The repeatable counts, checksum, and oracle comparisons support the narrow
-conclusion that the completed seed data was deterministic and that nearby
-correctness held for the recorded scenarios over the one-row-per-person
-last-known projection.
-
-The dense scenario demonstrates a deliberate cardinality range from 1 row at
-0.1 km to 49,994 rows at 20 km. No latency data exists to show how cost changed
-with that cardinality.
-
-The diagnostic HTTP timing shift and first-request outliers show why warm-up
-and repeated measured blocks are necessary. They do not establish normal
-service latency or production behavior.
-
-## Hypothesis status
-
-| Hypothesis or threshold | Status from supplied evidence |
+| Evidence | Value |
 | --- | --- |
-| Projection and nearby correctness | Not falsified by either completed seed; all recorded oracle checks passed. |
-| Database nearby p95 <= 100 ms and p99 <= 250 ms for 1-1,000 rows | Not evaluated; no measured database run. |
-| Core HTTP nearby p95 <= 250 ms and p99 <= 500 ms for 1-1,000 rows | Not evaluated; the application-path seed sample is not the warmed nearby benchmark. |
-| Indexed query at least 3x faster than unindexed baseline | Not evaluated; no baseline timings or plans. |
-| Winning-append throughput retains at least 50% of late-append throughput | Not evaluated; no write throughput run. |
-| Replays insert/update zero rows | Not evaluated by measured write-delta artifacts. |
+| Seed | `seed-20260721T080324Z` |
+| Measured run | `run-20260721T080716Z` |
+| Application Git SHA | `7a806cec1ddeadc9f9a56030c2b7a2f84dde3b07` |
+| Full source fingerprint | `0afd592bb8d93e6ac66bfc1f682eb00978f1a151c07e24019585e56056af94a2` |
+| Run manifest | schema 2, `completed: true` |
+| Dataset checksum | `945806b90bcb4cf75bb94b2ccf656905` |
+
+The fingerprint covers benchmark scripts, production source, migrations,
+Dockerfiles, build files, Compose configuration, and the Gradle wrapper JAR.
+It also covers the Python 3.9 PostgreSQL-timestamp compatibility fix exercised
+by this run.
+
+## Environment
+
+- macOS 26.4.1 on arm64, with 12 logical CPUs visible;
+- Docker Engine 29.5.2 on Linux arm64 through Colima;
+- Docker Compose 5.3.1 and Python 3.9.6;
+- PostgreSQL 17.10 and PostGIS 3.6.4;
+- PostgreSQL defaults included 128 MiB `shared_buffers`, 4 MiB `work_mem`,
+  `random_page_cost=4`, JIT enabled, and I/O timing disabled; and
+- relation sizes were 239 MiB for `person`, 1,423 MiB for
+  `location_observation`, and 202 MiB for
+  `last_known_location_projection`.
+
+No container CPU or memory limit was applied. This environment is suitable for
+local comparison only; it is not a production sizing environment.
+
+## Workload completeness
+
+The accepted raw-completeness report contains:
+
+| Workload | Completed evidence |
+| --- | ---: |
+| Nearby database latency | 10 scenarios x 3 repeats x 200 = 6,000 samples |
+| Nearby core HTTP latency | 10 scenarios x 3 repeats x 200 = 6,000 samples |
+| Nearby HTTP throughput | 18 x 60-second blocks; 821,382 requests |
+| Indexed/unindexed baseline | 2 workloads x 3 x 200 = 1,200 samples |
+| Experimental history pagination | 2 workloads x 3 x 200 = 1,200 samples |
+| Database writes | 4 workloads x 3 x 8,000 = 96,000 samples |
+| Core HTTP writes | 4 cohorts x 1,000 = 4,000 requests |
+| Query plans | 5 JSON `EXPLAIN (ANALYZE, BUFFERS)` artifacts |
+| State validation | 6 write-count snapshots plus exact artifact hashes |
+
+The figures below use three warmed repeat blocks. Latency percentiles combine
+the 600 samples for a scenario; throughput is the median of the three block
+rates. There is only one completed full run, so these data show within-run
+repetition, not run-to-run confidence intervals.
+
+## Seed and correctness
+
+The sole retained seed contained exactly:
+
+| Measure | Count |
+| --- | ---: |
+| Persons | 1,000,000 |
+| Observations | 5,000,000 |
+| Last-known projections | 1,000,000 |
+| Initial / no-key / client-update observations | 1,000,000 / 1,000,000 / 3,000,000 |
+| Chronological / late-arrival trails | 750,000 / 200,000 |
+| Received-at / UUID tiebreak trails | 40,000 / 10,000 |
+
+The full projection check compared all 1,000,000 production winners with the
+oracle and found zero duplicate-person, winner, trail-depth, membership,
+distance, or ordering mismatches. All ten nearby scenarios also matched the
+brute-force spheroidal oracle exactly. The 100-person application-transaction
+sample produced 500 observations and 100 projections with zero winner
+mismatches.
+
+## Nearby latency and cardinality
+
+### Database-only
+
+| Scenario | Rows | p50 ms | p95 ms | p99 ms |
+| --- | ---: | ---: | ---: | ---: |
+| Dense Auckland, 0.1 km | 1 | 0.882 | 1.248 | 2.391 |
+| Dense Auckland, 1 km | 125 | 1.595 | 2.154 | 3.263 |
+| Dense Auckland, 5 km | 3,125 | 17.005 | 21.725 | 29.515 |
+| Dense Auckland, 20 km | 50,001 | 180.895 | 196.013 | 230.664 |
+| Dense Auckland, 100 km | 50,041 | 108.156 | 121.292 | 165.896 |
+| Global origin, 1 km | 0 | 0.489 | 0.697 | 0.884 |
+| Global origin, 20 km | 2 | 0.571 | 0.904 | 1.062 |
+| Global origin, 100 km | 42 | 0.822 | 1.172 | 1.371 |
+| Antimeridian, 20 km | 2 | 0.557 | 0.777 | 0.955 |
+| Antimeridian, 100 km | 43 | 0.722 | 0.974 | 1.197 |
+
+### Core HTTP
+
+| Scenario | Rows | Median response | p50 ms | p95 ms | p99 ms |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Dense Auckland, 0.1 km | 1 | 395 B | 2.788 | 3.880 | 6.135 |
+| Dense Auckland, 1 km | 125 | 49,620 B | 2.957 | 3.433 | 3.775 |
+| Dense Auckland, 5 km | 3,125 | 1,240,488 B | 27.868 | 30.226 | 31.412 |
+| Dense Auckland, 20 km | 50,001 | 19,885,361 B | 375.081 | 413.853 | 429.993 |
+| Dense Auckland, 100 km | 50,041 | 19,901,263 B | 375.604 | 419.953 | 453.672 |
+| Global origin, 1 km | 0 | 2 B | 0.829 | 1.274 | 1.751 |
+| Global origin, 20 km | 2 | 797 B | 1.042 | 1.516 | 2.442 |
+| Global origin, 100 km | 42 | 16,679 B | 1.515 | 2.164 | 2.612 |
+| Antimeridian, 20 km | 2 | 792 B | 2.613 | 3.981 | 8.344 |
+| Antimeridian, 100 km | 43 | 17,149 B | 3.116 | 4.543 | 7.429 |
+
+For the predeclared 1-1,000-row band, the worst observed database result was
+p95 2.154 ms / p99 3.263 ms, and the worst core HTTP result was p95 4.543 ms /
+p99 8.344 ms. Both are below the declared 100/250 ms database and 250/500 ms
+HTTP thresholds.
+
+## Nearby HTTP throughput
+
+| Scenario | Rows | Concurrency | Median requests/s | p50 ms | p95 ms | p99 ms |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Dense Auckland, 0.1 km | 1 | 1 | 735.95 | 1.268 | 1.684 | 1.996 |
+| Dense Auckland, 0.1 km | 1 | 8 | 2,355.30 | 3.118 | 5.469 | 7.280 |
+| Dense Auckland, 1 km | 125 | 1 | 276.00 | 3.312 | 4.090 | 5.033 |
+| Dense Auckland, 1 km | 125 | 8 | 1,181.97 | 6.260 | 9.810 | 12.784 |
+| Dense Auckland, 20 km | 50,001 | 1 | 2.17 | 357.482 | 398.964 | 406.600 |
+| Dense Auckland, 20 km | 50,001 | 8 | 4.30 | 1,723.021 | 1,932.118 | 2,098.967 |
+
+Concurrency 8 improved the 50,001-row rate by only 1.98x while increasing p95
+latency to 1.93 seconds. These local rates describe this machine and payload;
+they are not service capacity or a safe operating limit.
+
+## Indexed versus unindexed baseline
+
+The controlled comparison used identical 100,000-row subsets and the same
+selective query.
+
+| Variant | p50 ms | p95 ms | p99 ms | Median requests/s | Plan |
+| --- | ---: | ---: | ---: | ---: | --- |
+| GiST indexed | 0.512 | 0.699 | 0.991 | 1,699.51 | GiST index scan |
+| Deliberately unindexed | 86.659 | 92.812 | 110.411 | 11.48 | parallel sequential scan |
+
+The indexed p95 was 132.8x faster than the unindexed p95, exceeding the
+predeclared 3x threshold.
+
+## Write paths and replay deltas
+
+### Database latency and throughput
+
+| Workload | Samples | p50 ms | p95 ms | p99 ms | Median writes/s |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Winning append | 24,000 | 1.440 | 4.605 | 8.053 | 4,184.72 |
+| Late append | 24,000 | 1.278 | 4.437 | 7.823 | 4,905.39 |
+| Client-key replay | 24,000 | 0.655 | 1.273 | 3.947 | 9,955.50 |
+| Same-point no-key replay | 24,000 | 0.799 | 1.489 | 4.438 | 8,463.49 |
+
+Winning-append throughput retained 85.3% of late-append throughput, above the
+declared 50% floor.
+
+### Exact measured-block state deltas
+
+| Phase | Observation delta | Client-update delta | Winning-projection delta |
+| --- | ---: | ---: | ---: |
+| 24,000 winning appends | +24,000 | +24,000 | +24,000 |
+| 24,000 late appends | +24,000 | +24,000 | 0 |
+| 24,000 client-key replays | 0 | 0 | 0 |
+| 24,000 same-point no-key replays | 0 | 0 | 0 |
+| HTTP: 1,000 each of four write cohorts | +2,000 | +2,000 | +1,000 |
+
+The HTTP delta is exactly the 1,000 winning plus 1,000 late appends; both
+1,000-request replay cohorts inserted no observation and changed no
+projection. All 4,000 HTTP writes returned the expected success status.
+
+## Current query-plan set
+
+The run captured five current plans:
+
+- production nearby at dense Auckland / 1 km: GiST scan on
+  `last_known_location_projection_location_gist_idx`, then person primary-key
+  lookups; 125 rows; no `location_observation` scan;
+- indexed 100k baseline: GiST scan on
+  `projection_subset_indexed_location_gist_idx`;
+- unindexed 100k baseline: parallel sequential scan;
+- first history page: index scan on
+  `location_observation_client_update_unique`; and
+- next history page: `history_cursor_person_id_idx` plus
+  `location_observation_client_update_unique`.
+
+The captured production nearby plan executed in 3.933 ms and satisfied the
+correctness requirement that nearby read the maintained projection rather than
+derive latest state from history. History pagination remains experimental and
+is not a core HTTP claim.
+
+## Interpretation and hypothesis outcomes
+
+| Predeclared hypothesis | Outcome |
+| --- | --- |
+| Projection and nearby correctness | Passed every seed, oracle, shape, and measured-response check. |
+| Database nearby p95 <= 100 ms and p99 <= 250 ms for 1-1,000 rows | Passed; worst p95/p99 were 2.154/3.263 ms. |
+| Core HTTP nearby p95 <= 250 ms and p99 <= 500 ms for 1-1,000 rows | Passed; worst p95/p99 were 4.543/8.344 ms. |
+| Indexed p95 at least 3x faster than unindexed | Passed at 132.8x. |
+| Winning append retains at least 50% of late-append throughput | Passed at 85.3%. |
+| Replays insert zero observations and update zero projections | Passed for database and HTTP replay cohorts. |
+| Production nearby avoids history | Passed in the captured plan. |
+
+The main measured bottleneck is uncapped response cardinality and payload size.
+At roughly 50,000 rows, database p50 was 108-181 ms while core HTTP p50 was
+about 375 ms and each response was about 19.9 MB. This supports the conclusion
+that response construction, JSON serialization, and local transfer together
+add substantial end-to-end cost beyond the indexed spatial query. The data do
+not isolate those three application/transport components from one another.
+
+The 50,001-row concurrency result also shows saturation: eight clients nearly
+doubled throughput rather than increasing it eightfold, while p95 latency rose
+to 1.93 seconds. This is a local bottleneck observation, not evidence of a
+production scaling limit.
 
 ## Limitations and publication boundary
 
-- This evidence is from a local arm64 Colima environment, not production.
-- No production extrapolation is made.
-- No true cold-cache run was supplied; the diagnostic first request must not be
-  labelled a cold-cache measurement.
-- No warm measured run, throughput run, pagination run, write-path run, or
-  indexed/unindexed comparison was supplied.
-- Database-only and core HTTP latency cannot be separated from these files.
-- No query plan exists to prove that a measured nearby query used the
-  last-known projection index or avoided a history scan.
-- The benchmark harness was untracked, so the Git SHA alone is insufficient
-  for reproduction.
-- The current harness now detaches Compose-exec stdin and requires an exact,
-  recorded raw-artifact completeness gate before completion or summarization.
-  That later hardening has not produced a new seed or measured run and does not
-  upgrade the historical evidence analyzed here.
-- Secure/authenticated HTTP trail performance remains outside this evidence.
-
-A performance result should not be published from this artifact set. A
-completed raw `run-*` directory with its manifest, repeated samples,
-cardinalities, database environment, write deltas, and query plans is required
-before the performance hypotheses or bottlenecks can be evaluated.
+- This is one completed run on a local arm64 Colima environment; no run-to-run
+  variance or hardware comparison is available.
+- Restart-first evidence is not a proven cold filesystem-cache measurement.
+- No CPU, memory, storage, network, or production concurrency model was
+  controlled beyond the recorded environment.
+- The production route is intentionally uncapped; high-cardinality values are
+  a latency/cardinality curve, not a selective-query SLA failure.
+- Authenticated owner/trusted-viewer history HTTP remains deferred.
+- No production throughput, capacity, SLO, instance-count, or cost claim is
+  made from this result.

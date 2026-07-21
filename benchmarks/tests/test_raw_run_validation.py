@@ -445,6 +445,23 @@ class RawRunValidationTest(unittest.TestCase):
                 SMALL_SPEC,
             )
 
+    def test_postgres_short_utc_offset_in_write_snapshot_is_accepted(self) -> None:
+        path = self.run_dir / "write-counts-before.csv"
+        with path.open(encoding="utf-8") as input_file:
+            rows = list(csv.DictReader(input_file))
+        rows[0]["captured_at"] = "2026-01-01 00:00:01+00"
+        write_csv(path, validate_raw.WRITE_COUNT_FIELDS, rows)
+
+        report = validate_raw.validate_raw_artifacts(
+            self.run_dir,
+            RUN_ID,
+            GIT_SHA,
+            SOURCE_FINGERPRINT,
+            SMALL_SPEC,
+        )
+
+        self.assertEqual(report["counts"]["write_count_snapshots"], 6)
+
     def test_summarizer_refuses_when_shared_validator_fails(self) -> None:
         summary = self.run_dir / "summary.md"
         with mock.patch.object(
